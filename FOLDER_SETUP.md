@@ -17,7 +17,7 @@ the short version: what a working folder looks like, and the usual mistakes.
       SMK/                disc 1  INSTALL\DATA\SMK\                  optional: the menus' animations
         B02GBSMK.SMK ... B15WISMK.SMK  (16 files)
       music/                      disc 2's audio tracks 2-12, ripped  optional: the soundtrack
-        track02.wav ... track12.wav    (16-bit stereo, 44.1 kHz)
+        track02.wav ... track12.wav    (16-bit stereo, 44.1 kHz; or track02.ogg / track02.mp3 ...)
       VIDEO/              disc 2  VIDEO\                         optional: the cutscenes (needs FFmpeg)
         ZL_CUT01.AVI ... ZL_CUT16.AVI  B51MOVIE.AVI  NDEATH.AVI  SDEATH.AVI
       CHARINFO.HG1                written by the port: your games
@@ -43,7 +43,9 @@ Then run `heavygear /path/to/HeavyGear`.
 - **Looking for the music on disc 1.** Disc 1 is data only. The soundtrack is disc 2's audio tracks.
 - **Numbering the music from 1.** Keep the CD's numbers: the first music track is `track02.wav`. A ripper that numbers
   the audio tracks from 1 needs its files renamed (track 1 -> track02, ... track 11 -> track12), or a `wavmap.ini`.
-- **FLAC or MP3 rips.** Only WAV is read; convert them back to 16-bit, 44.1 kHz WAV.
+- **FLAC rips.** WAV, Ogg Vorbis and MP3 are read, FLAC isn't: convert it (`ffmpeg -i track02.flac track02.ogg`).
+- **Tracks named by title.** The files must be named `track02` ... `track12` (plus `.wav`, `.ogg` or `.mp3`), or listed
+  in a `wavmap.ini`.
 - **cdparanoia's names.** `track02.cdda.wav` must be renamed `track02.wav`.
 - **A plain `.iso` of disc 2 for the music.** An ISO holds only the data track; use an `.mds` / `.cue` image or rip the
   tracks.

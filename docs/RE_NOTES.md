@@ -136,7 +136,12 @@ Parser: 0x100c5e73, called through 0x100c5e01.
   record of the same name (the type string at 0x10122d50 is "SDF", in the 0x100c1152 loader). The SDF holds up to 10 model
   names at `+0x0c + n*0x20`.
   - `o_` objects: the names are detail levels, with a float switch distance per level at `+0x14c + n*4` (o_1tents:
-    o_2tents beyond 25,000).
+    o_2tents beyond 25,000). The first level's is 10 when there are more, 0 when there aren't (all 443 o-SDFs). The
+    loader (0x1000361c) keeps the levels in a list sorted by distance; the draw (0x10090750) takes the last level whose
+    distance times the view's detail scale (view +0xb8 = half width x zoom / (160 x detail), detail 0x101244f8 = 1, or 2
+    for low detail; set in 0x100b8496) the object's depth reaches, and the first level when its distance is 0. The
+    depth is the object's bounding-box centre along the view direction (0x10078797 / 0x100b899d: (centre - eye) .
+    forward, the forward axis at 0x10152e98).
   - `oc` objects (second letter 'c', special-cased by the loader): the names are the collapse animation frames
     (oC1..oC8).
   - `oa` objects: the remains (INFERRED from the names).
@@ -241,9 +246,11 @@ software renderer's) and an RGB colour (the 3D renderers').
 - The vertex intensity handed to the plugin is row << 3. I76DRAW scales it by 1/255 (Render 0x10003a70); its
   rasterizers index their 32-row table with (1 - that) * 7936 (31 * 256, 8.8 fixed point), interpolated across the
   polygon, the high byte picking the row. The sim hands that table over upside down (0x1000103f), so the TBL row
-  reached is 31 - the index. The intensity's low three bits: the port sets them (row << 3 | 7) as the hardware path
-  does (0x100012c5); INFERRED for this path, it brings mission 1's flat ground (row 18) to TBL row 19 as on the
-  original's frame.
+  reached is 31 - the index. The intensity's low three bits: the software branch of 0x100012c5 (0x1014a5e8 == 0)
+  hands over row << 3 with them clear (the 3D branch: << 3 | 7), and I76DRAW's mode-2 rasterizer (0x10002650) rounds
+  (1 - i / 255) * 7936 to nearest (the 1.5 x 2^52 trick, 0x1000f0d8) and takes the high byte of the 8.8 value - so
+  row 18 reaches table row 18. The original's frame showed mission 1's flat ground (row 18 by the port's sums) at row
+  19, which | 7 reproduces; the port keeps | 7, calibrated, until the difference is found.
 - I76DRAW's rasterizers skip texel index 255 (the colour key, e.g. 0x10002db5).
 - Checked in the running original: flat ground in mission 1 has row 18 near the player and climbs with the fog to 31
   by 72,000 units; in mission 10 the ground beyond shadedist is at row 4.
@@ -1026,7 +1033,7 @@ use tracks 2-9; the game CD has audio tracks 2-12. The shell itself plays no mus
   0x34 wxsmfire, 0x35 wxsmokec (x10 each), 0x49 wxrgntrl, 0x4a wxcnnhit, 0x4b wxlashit (x20).
 - The models are one quad (two crossed for the muzzle flashes) in x / y, its base at the origin for explosions,
   centred for others (wxcnnhit +-107, wxgdeath +-520; wxexplod 0..590 high), labelled with gearxpl1's animated materials
-  (LASER HIT, CANNON HIT, EXPLOSION -> EXPLSION WXEXPL01..14, GEAR DEATH -> WXGDTH01..27 ...).
+  (LASER HIT, CANNON HIT, EXPLOSION -> EXPLSION WXEXPL01..14, GEAR DEATH -> WXGDTH01..27 ...; patch 1.2: below).
 - Starting (0x1001b3a1, after the kind's remap): the effect table's +0x10 / +0x14 (every entry has +0x14 set) send it to
   the pool: among the type's entries, a free one is taken; running ones within 500 (0x100eb490) count, unless the
   table's +0x28 has bit 1 or the type is a muzzle flash 0x17..0x21 (0x4c counts): any at the low LOD quality
@@ -1060,6 +1067,26 @@ use tracks 2-9; the game CD has audio tracks 2-12. The shell itself plays no mus
   centre less half its radius against the ground; meeting the ground while still rising takes the chunk off;
   falling slower than 0.5525 a tick it rests; else it bounces (vy / -4, half the time vy halved again and vx, vz
   reversed and halved; the turn rates reversed and halved).
+  Each tick the chunk turns by its rates (0x100955b7, order 0): the turn's quaternion is Z(wz) * (X(wx) * Y(wy))
+  (0x10052fcb; 0x10052e3e builds an axis-angle quaternion in degrees, 0x10052ebe is the Hamilton product), multiplied
+  in front of the chunk's own (q = E * q). As matrices: m = Rz Rx Ry m.
+- Facing the eye (0x10037fcc, once a frame): every object of render type 0x10, 0x20 (the effects: the HGXP loader sets
+  it, 0x10095980(obj, 0x20)) or 0x60 that is shown is turned about y to yaw = atan2(eye x - x, eye z - z) (0x1006f4ee,
+  degrees), pitch 0 - its +z face towards the eye's position. In view mode 4 (0x1018ea7c) they get yaw 180, pitch -45.
+  Muzzle flashes fixed to a vehicle get render word 0xff9f instead (not turned).
+- The texture sequence: an HGXP record names a sequence slot (+10); starting an effect resets the slot to frame 0
+  (0x1000204c) and sets its mode from the effect table's +0x1c (0x10001ffe): 1 loops (0x2f, 0x34, 0x35), 2 makes
+  one pass (the rest). The slots step every 0xb5 / rate ticks (0x10001725; the rate from the MLT, 0x100bef4c, integer
+  division); a mode 2 slot that wraps stops (mode 0, frame 0), and a stopped slot hands back no texture (0x100021e1),
+  so the effect's polygon is no longer drawn. The slot is the record's: every effect of a type shares it.
+- Drawing (MLT type 3 polygons, draw kind 0x3000, any object): the shading step (0x10026610) passes the word through
+  unlit (unless the night-vision mask 0x1011fa40 is set, 0xb00: then lit as kind 0x1000); the render switch
+  (0x1008bd80) sends it to 0x10086fb0 -> 0x1008700c: u / v each put at 0.01 or 0.99 by which side of 0.5 they are,
+  +0x18 = 0xff000000 (no fog), then 0x10001513: colour the view's tint (0x10118198..a0: white, green 0x4b ff 4b in
+  night vision), intensity 0x80 in software (table row 16) or 0xff in 3D, alpha byte (+0x17) 200, render mode 2.
+- Patch 1.2 retextured the effects (gearxpl1.mlt / .mlu in Patch\: EXPLOSION -> FXBOOM00..04 and so on, rate 12),
+  TEX only. The software renderer loads XEL only (0x1000189d / 0x100021e1, type string 0x1011fd48 "XEL") and draws
+  nothing for a texture without one; the port draws the TEX there instead.
 
 ## Structures (GT chunks; the GT branch of 0x100c1152, 0x1001cc6c)
 

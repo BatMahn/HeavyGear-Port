@@ -107,7 +107,8 @@ void raster_triangle(raster_target *t, const raster_vertex *a, const raster_vert
                     col |= 0xff000000u;
                 } else {
                     col = tex->texels[(size_t)ty * tex->w + tx];
-                    if (!(col >> 24)) continue;
+                    if ((col >> 24) < 128) continue;   /* the same alpha test as the filtered path */
+                    col |= 0xff000000u;
                 }
             } else {
                 col = argb;

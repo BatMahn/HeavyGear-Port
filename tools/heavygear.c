@@ -71,7 +71,7 @@ static int struct_down = -1;   /* the structure the shot just brought down (for 
 static effects fx;
 static battle *fx_battle;
 static int fx_add(void *ctx, const char *model) { return world_add_effect((world *)ctx, model); }
-static void fx_set(void *ctx, int h, int on, float x, float y, float z, float age) { world_set_effect((world *)ctx, h, on, x, y, z, age); }
+static void fx_set(void *ctx, int h, int on, float x, float y, float z, float age, int seq) { world_set_effect((world *)ctx, h, on, x, y, z, age, seq); }
 /* start an effect and, if it started, its sound there (0x1001b3a1: +8 > 0, the chance +0xc) - quiet in the cockpit
  * view unless `loud` */
 static int fx_play(int e, float x, float y, float z, int follow, int loud)
@@ -84,14 +84,8 @@ static int fx_play(int e, float x, float y, float z, int follow, int loud)
 }
 
 static float fx_ground(void *ctx, float x, float z) { int found; return world_ground_height((world *)ctx, x, z, &found); }
-static float fx_radius(void *ctx, int h)
-{
-    float mn[3], mx[3];
-    if (world_object_bounds((world *)ctx, h, mn, mx)) return 0;
-    float dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2];
-    return 0.5f * SDL_sqrtf(dx * dx + dy * dy + dz * dz);   /* INFERRED: the box's, for the bounding sphere's */
-}
-static void fx_turn(void *ctx, int h, float yaw, float pitch, float roll) { world_turn_object((world *)ctx, h, yaw, pitch, roll); }
+static float fx_radius(void *ctx, int h) { return world_object_radius((world *)ctx, h, NULL); }
+static void fx_turn(void *ctx, int h, const float m[9]) { world_set_object_matrix((world *)ctx, h, m); }
 
 static void on_killed(void *ctx, int victim, int owner);
 
@@ -116,13 +110,12 @@ static void fx_splash(void *ctx, int owner, float x, float y, float z, float rad
     }
     for (int i = b->st->n - 1; i >= 0; i--) {
         if (b->st->s[i].dead) continue;
-        float mn[3], mx[3], ox, oy, oz, rs, rc;
+        float l[3], ox, oy, oz, rs, rc;
         int in = b->st->s[i].inst;
-        if (world_object_bounds(b->w, in, mn, mx) || world_object_pose(b->w, in, &ox, &oy, &oz, &rs, &rc)) continue;
-        float lx = (mn[0] + mx[0]) / 2, ly = (mn[1] + mx[1]) / 2, lz = (mn[2] + mx[2]) / 2, r = 0;
-        float c[3] = {ox + lx * rc + lz * rs, oy + ly, oz - lx * rs + lz * rc};
-        for (int k = 0; k < 3; k++) r += (mx[k] - mn[k]) * (mx[k] - mn[k]);
-        r = SDL_sqrtf(r) / 2;   /* INFERRED: the box's half diagonal for the bounding sphere */
+        if (world_object_pose(b->w, in, &ox, &oy, &oz, &rs, &rc)) continue;
+        /* its bounding sphere (0x10003dce: the model's +0x44 centre, +0x50 radius, 0x10003326) */
+        float r = world_object_radius(b->w, in, l);
+        float c[3] = {ox + l[0] * rc + l[2] * rs, oy + l[1], oz - l[0] * rs + l[2] * rc};
         float dx = c[0] - x, dy = c[1] - y, dz = c[2] - z;
         if (SDL_sqrtf(dx * dx + dy * dy + dz * dz) >= r + radius) continue;
         if (structures_damage(b->st, b->w, i, (int)power)) {

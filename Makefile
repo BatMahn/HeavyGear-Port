@@ -30,7 +30,7 @@ endif
 
 CORE := src/hgprj.c src/unpack.c src/fsutil.c src/wtb.c src/tex.c src/bwd.c src/material.c src/mission.c
 VIEW := $(CORE) src/raster.c src/world.c src/skygnd.c src/shp.c src/hud.c src/gear.c src/sim.c src/gearmodel.c src/units.c src/combat.c src/structures.c src/objectives.c src/radio.c src/effects.c
-AUDIO := src/audio.c src/sfx.c
+AUDIO := src/audio.c src/sfx.c src/codecs.c
 SHELL_SRC := src/pcx.c src/smk.c src/shell.c src/brf.c src/career.c src/zlite.c src/front.c src/squad.c src/garage.c src/modelview.c src/design.c src/vdf.c
 
 all: hgprj$(EXE) test_data$(EXE) hgview$(EXE) heavygear$(EXE)

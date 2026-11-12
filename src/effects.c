@@ -76,10 +76,11 @@ int effects_debris(effects *fx, float x, float y, float z, int n)
         s->v[0] = (float)nrand(fx) / 1024.0f * 4.0f;
         s->v[2] = (float)nrand(fx) / 1024.0f * 4.0f;
         s->v[1] = (float)(nrand(fx) + 0x400) / 1024.0f * 4.0f;
-        for (int a = 0; a < 3; a++) { s->w[a] = (float)nrand(fx) * 0.5f / 1024.0f; s->rot[a] = 0; }
+        for (int a = 0; a < 3; a++) s->w[a] = (float)nrand(fx) * 0.5f / 1024.0f;
+        for (int a = 0; a < 9; a++) s->m[a] = a % 4 == 0 ? 1.0f : 0.0f;
         s->r = fx->ops.radius ? fx->ops.radius(fx->ops.ctx, s->h) : 0;
-        fx->ops.set(fx->ops.ctx, s->h, 1, x, y, z, 0);
-        if (fx->ops.turn) fx->ops.turn(fx->ops.ctx, s->h, 0, 0, 0);
+        fx->ops.set(fx->ops.ctx, s->h, 1, x, y, z, 0, gear_effect[0x0b].seq);
+        if (fx->ops.turn) fx->ops.turn(fx->ops.ctx, s->h, s->m);
         k++;
     }
     return k;
@@ -89,6 +90,12 @@ void effects_wreck(effects *fx, float x, float y, float z)
 {
     for (int i = 0; i < 32; i++)
         if (fx->burn[i].left <= 0) { fx->burn[i].x = x; fx->burn[i].y = y; fx->burn[i].z = z; fx->burn[i].left = 0x712; return; }
+}
+
+static void mat3_mul(const float *a, const float *b, float *o)
+{
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) o[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
 }
 
 /* 0x1001ef21: a chunk's flight, one tick */
@@ -122,8 +129,22 @@ static void fly(effects *fx, fx_slot *s)
     s->x += s->v[0];
     s->y += ny - bottom;
     s->z += s->v[2];
-    for (int a = 0; a < 3; a++) s->rot[a] += s->w[a];
-    if (fx->ops.turn) fx->ops.turn(fx->ops.ctx, s->h, s->rot[1], s->rot[0], s->rot[2]);
+    /* the chunk turns by its rates each tick (0x100955b7 with order 0): the turn's quaternion is Z * (X * Y)
+     * (0x10052fcb; 0x10052ebe the Hamilton product, 0x10052e3e axis-angle in degrees), multiplied in front of the
+     * chunk's own: in matrices m = Rz(w z) Rx(w x) Ry(w y) m */
+    {
+        const float d = 3.14159265f / 180.0f;
+        float cx = cosf(s->w[0] * d), sx = sinf(s->w[0] * d), cy = cosf(s->w[1] * d), sy = sinf(s->w[1] * d);
+        float cz = cosf(s->w[2] * d), sz = sinf(s->w[2] * d);
+        const float rx[9] = {1, 0, 0, 0, cx, -sx, 0, sx, cx}, ry[9] = {cy, 0, sy, 0, 1, 0, -sy, 0, cy};
+        const float rz[9] = {cz, -sz, 0, sz, cz, 0, 0, 0, 1};
+        float t[9], u[9], n[9];
+        mat3_mul(rx, ry, t);
+        mat3_mul(rz, t, u);
+        mat3_mul(u, s->m, n);
+        for (int a = 0; a < 9; a++) s->m[a] = n[a];
+    }
+    if (fx->ops.turn) fx->ops.turn(fx->ops.ctx, s->h, s->m);
     if (done) s->body = 0;
 }
 
@@ -170,7 +191,7 @@ int effects_start(effects *fx, int type, float x, float y, float z, int follow)
         if (follow >= 0 && fx->ops.vehicle_pos && fx->ops.vehicle_pos(fx->ops.ctx, follow, p)) s->follow = follow;
         else s->left = 0xb5;
     }
-    fx->ops.set(fx->ops.ctx, s->h, 1, s->x, s->y, s->z, 0);
+    fx->ops.set(fx->ops.ctx, s->h, 1, s->x, s->y, s->z, 0, gear_effect[type].seq);
     return 1;
 }
 
@@ -202,9 +223,9 @@ void effects_tick(effects *fx, int dt)
         s->left -= dt;
         if (s->left < 1) {
             s->on = 0;
-            fx->ops.set(fx->ops.ctx, s->h, 0, s->x, s->y, s->z, 0);
+            fx->ops.set(fx->ops.ctx, s->h, 0, s->x, s->y, s->z, 0, 0);
         } else {
-            fx->ops.set(fx->ops.ctx, s->h, 1, s->x, s->y, s->z, (float)s->age);
+            fx->ops.set(fx->ops.ctx, s->h, 1, s->x, s->y, s->z, (float)s->age, gear_effect[s->type].seq);
         }
     }
 }

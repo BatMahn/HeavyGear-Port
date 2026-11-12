@@ -47,7 +47,7 @@ jobs:
           patchelf --version >/dev/null 2>&1 || sudo apt-get install -y patchelf
           patchelf --set-rpath '$ORIGIN' dist/hg-port/hgview
           patchelf --set-rpath '$ORIGIN' dist/hg-port/heavygear
-          cp -r README.md FOLDER_SETUP.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
+          cp -r README.md FOLDER_SETUP.md THIRD_PARTY.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
           tar czf dist/hg-port-linux-x86_64.tar.gz -C dist hg-port
       - uses: actions/upload-artifact@v4
         with:
@@ -74,7 +74,7 @@ jobs:
           install_name_tool -id "@executable_path/$(basename "$SDLLIB")" "dist/hg-port/$(basename "$SDLLIB")"
           codesign --force -s - "dist/hg-port/$(basename "$SDLLIB")" dist/hg-port/heavygear dist/hg-port/hgview dist/hg-port/hgprj
           lipo dist/hg-port/hgview -verify_arch arm64
-          cp -r README.md FOLDER_SETUP.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
+          cp -r README.md FOLDER_SETUP.md THIRD_PARTY.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
           cd dist && zip -qry hg-port-macos-arm64.zip hg-port
       - uses: actions/upload-artifact@v4
         with:
@@ -97,7 +97,7 @@ jobs:
         run: |
           mkdir -p dist/hg-port
           cp heavygear.exe hgview.exe hgprj.exe SDL3-$SDL3_VERSION/x86_64-w64-mingw32/bin/SDL3.dll dist/hg-port/
-          cp -r README.md FOLDER_SETUP.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
+          cp -r README.md FOLDER_SETUP.md THIRD_PARTY.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
           cd dist && zip -qr hg-port-windows-x64.zip hg-port
       - uses: actions/upload-artifact@v4
         with:

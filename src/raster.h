@@ -1,6 +1,6 @@
 /*
  * raster.h - the port's CPU triangle rasterizer: 32-bit colour, float depth, perspective-correct texture
- * coordinates, nearest texel, wrap addressing, alpha test (a texel with alpha 0 is not drawn).
+ * coordinates, nearest texel, wrap addressing, alpha test (a texel with alpha below 128 is not drawn).
  */
 #ifndef HG_RASTER_H
 #define HG_RASTER_H

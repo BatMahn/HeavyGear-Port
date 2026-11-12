@@ -41,11 +41,15 @@ void   world_show_object(world *w, int id, int on);
 /* an effect model (a flat quad drawn facing the camera, unlit, its animated material run from its start); hidden
  * until world_set_effect turns it on. -1 if the model isn't there */
 int    world_add_effect(world *w, const char *model);
-void   world_set_effect(world *w, int id, int on, float x, float y, float z, float age_ticks);
-/* turn an object fully (degrees; yaw about y, pitch about x, roll about z); it is then drawn lit, as a solid */
-void   world_turn_object(world *w, int id, float yaw, float pitch, float roll);
+void   world_set_effect(world *w, int id, int on, float x, float y, float z, float age_ticks, int seq);
+/* an object's orientation as a rotation matrix (row-major, applied to the model's points as m v); it is then drawn
+ * lit, as a solid */
+void   world_set_object_matrix(world *w, int id, const float m[9]);
 /* an object's model bounds, in its own frame (before its yaw and position); 0 on success */
 int    world_object_bounds(const world *w, int id, float mn[3], float mx[3]);
+/* the model's bounding sphere as the sim keeps it (0x10003326): centred on its box's centre, reaching its farthest
+ * point; halved for models named w..., / 1.5 for names containing ENBP. centre (model space) may be NULL. */
+float  world_object_radius(const world *w, int id, float centre[3]);
 /* shots: p[i] = {x, y, z (head), x, y, z (tail)} */
 void   world_draw_streaks(const world *w, raster_target *t, const camera *cam, const float (*p)[6], int n, uint32_t rgb);
 /* the instance drawing mission obj slot `obj`, or -1 */

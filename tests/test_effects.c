@@ -8,7 +8,7 @@
 static int made, shown[64], vx;
 static float ly;
 static int f_add(void *c, const char *m) { (void)c; (void)m; return made < 64 ? made++ : -1; }
-static void f_set(void *c, int h, int on, float x, float y, float z, float age) { (void)c; (void)x; (void)z; (void)age; shown[h] = on; ly = y; }
+static void f_set(void *c, int h, int on, float x, float y, float z, float age, int seq) { (void)c; (void)x; (void)z; (void)age; (void)seq; shown[h] = on; ly = y; }
 static int f_pos(void *c, int u, float p[3]) { (void)c; if (u != 3) return 0; p[0] = (float)vx; p[1] = 1000; p[2] = 0; return 1; }
 static float f_ground(void *c, float x, float z) { (void)c; (void)x; (void)z; return 100.0f; }
 static float f_radius(void *c, int h) { (void)c; (void)h; return 20.0f; }
@@ -16,7 +16,17 @@ static int turned, sp_n, sp_veh, sp_owner;
 static float sp_r, sp_p;
 static void f_splash(void *c, int o, float x, float y, float z, float r, float p, int v)
 { (void)c; (void)x; (void)y; (void)z; sp_n++; sp_r = r; sp_p = p; sp_veh = v; sp_owner = o; }
-static void f_turn(void *c, int h, float a, float b, float d) { (void)c; (void)h; (void)a; (void)b; (void)d; turned++; }
+static float ortho_err;
+static void f_turn(void *c, int h, const float m[9])
+{
+    (void)c; (void)h; turned++;
+    for (int i = 0; i < 3; i++)          /* the orientation stays a rotation: rows orthonormal */
+        for (int j = 0; j < 3; j++) {
+            float d = m[i * 3] * m[j * 3] + m[i * 3 + 1] * m[j * 3 + 1] + m[i * 3 + 2] * m[j * 3 + 2] - (i == j);
+            if (d < 0) d = -d;
+            if (d > ortho_err) ortho_err = d;
+        }
+}
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
@@ -76,6 +86,7 @@ int main(void)
     CHECK(resting == effects_active(&fx));
     CHECK(low);
     CHECK(turned > 0);
+    CHECK(ortho_err < 1e-3f);
     effects_tick(&fx, 1810);
     CHECK(effects_active(&fx) == 0);
     effects_wreck(&fx, 0, 100, 0);

@@ -8,7 +8,7 @@ traced. Heavy Gear runs on a later generation of the MechWarrior 2 engine. The M
 compare against, never as code: every format and value here is taken from Heavy Gear's own binaries and data.
 Portable C99 with SDL3; builds on macOS, Linux and Windows. You need your own copy of the game's two CDs (see "Setting up the game folder": no installation needed).
 
-## Status (2026-11-11, v0.7.0 - early preview)
+## Status (2026-11-11, v0.7.2 - early preview)
 
 **Not fully playable yet.** It loads the game's data, runs the story's front end (briefing, squad, gear editor) and
 lets you fight a mission. See CHANGELOG.md for what each release added.
@@ -79,7 +79,7 @@ mistakes.**
       NAGA.VDF       REQUIRED for the gear editor (disc 1, INSTALL\DATA\)
       LANG.INI       optional  (disc 1, INSTALL\DATA\) the language; English without it
       SMK\           optional  (disc 1, INSTALL\DATA\SMK\) the landship's and the menus' animations
-      music\         optional  the soundtrack: disc 2's audio tracks as track02.wav ... track12.wav (see "The music")
+      music\         optional  the soundtrack: disc 2's audio tracks as track02 ... track12 (.wav, .ogg or .mp3; see "The music")
       VIDEO\         optional  (disc 2, VIDEO\) the cutscenes (see "The cutscenes")
 
 The port writes your games (`CHARINFO.HG1`) and the gears you design in the gear editor (`*.GDF`) into this folder, so
@@ -149,8 +149,10 @@ tracks in any one of these ways (it tries them in this order):
        ...
 
    paths relative to the game folder. Only needed if your files are named differently from the next option.
-2. **A `music` folder of WAV files:** rip disc 2's tracks 2-12 to `music\track02.wav` ... `music\track12.wav`
-   (`track2.wav` also works) - 16-bit stereo PCM at 44.1 kHz, as any CD ripper writes them. Keep the CD's track
+2. **A `music` folder:** rip disc 2's tracks 2-12 to `music\track02.wav` ... `music\track12.wav` (`track2.wav` also
+   works), or the same names as **Ogg Vorbis** (`track02.ogg`) or **MP3** (`track02.mp3`). WAV is read as it is
+   (16-bit stereo PCM at 44.1 kHz, as any CD ripper writes it); Ogg and MP3 at any bit rate and sample rate, mono or
+   stereo (the port decodes a track whole when it starts, and converts other rates to 44.1 kHz). Keep the CD's track
    numbers: the first music track is `track02`, not `track01`. Rippers: Exact Audio Copy or Windows Media Player
    (format WAV) on Windows; XLD, or the Music app with its import format set to WAV, on macOS; `cdparanoia -B 2-12`
    on Linux (it writes `track02.cdda.wav` ...: rename them to `track02.wav` ...).
@@ -158,9 +160,10 @@ tracks in any one of these ways (it tries them in this order):
        HeavyGear/music/track02.wav
        HeavyGear/music/track03.wav
        ...
-       HeavyGear/music/track12.wav
+       HeavyGear/music/track12.wav       (or track02.ogg ... / track02.mp3 ...)
 
-   FLAC and MP3 aren't read: convert them back to WAV (16-bit, 44.1 kHz) first.
+   FLAC isn't read: convert it to WAV, Ogg or MP3 first (e.g. `ffmpeg -i track02.flac track02.ogg`). When a track has
+   several files, WAV wins, then Ogg, then MP3. `wavmap.ini` paths may name Ogg and MP3 files too.
 3. **An image of disc 2** in the game folder or a `cd` subfolder: an Alcohol 120% `.mds` + `.mdf` pair, or a
    `.cue` + `.bin` (raw 2352-byte sectors, one BIN file). The port plays the audio tracks straight out of the image -
    and finds the cutscenes in it too. A plain `.iso` holds only the data track (no music).
@@ -182,7 +185,7 @@ video: the port plays them only when it was built with FFmpeg (see "Build"); oth
     HeavyGear/
       HEAVYG.MAP  HEAVYG.PRJ  GEAR.VDF  MAMMOTH.VDF  NAGA.VDF  LANG.INI
       SMK/        B02GBSMK.SMK ... B15WISMK.SMK
-      music/      track02.wav ... track12.wav
+      music/      track02.wav ... track12.wav   (or .ogg / .mp3)
       VIDEO/      ZL_CUT01.AVI ... ZL_CUT16.AVI  B51MOVIE.AVI  NDEATH.AVI  SDEATH.AVI
       (plus whatever else came along from INSTALL\DATA\: HG.EXE, the DLLs, CFGS\ ... - harmless)
 
@@ -206,6 +209,8 @@ hgprj  <game folder> list | verify | get NAME.EXT out | extract outdir
 
 Heavy Gear is a trademark of its owners, and the game's data is theirs: this repository ships none of it, except the
 freely distributed 1.2 patch's data files in `gamedata/patch12/`. The port's source is GPL-2.0-or-later (LICENSE).
+Third-party code keeps its own licence (THIRD_PARTY.md): dr_mp3 (public domain / MIT-0) and stb_vorbis (public domain
+/ MIT), in `src/third_party/`, decode the soundtrack's MP3 and Ogg files.
 
 ## Credits
 

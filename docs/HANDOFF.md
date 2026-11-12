@@ -1,4 +1,4 @@
-# Session handoff (2026-11-11, v0.7.0)
+# Session handoff (2026-11-11, v0.7.2)
 
 Repository: https://github.com/BatMahn/HeavyGear-Port (BatMahn; commits as `BatMahn <65992136+BatMahn@users.noreply.github.com>`).
 
@@ -7,6 +7,13 @@ See the top-level handoff notes for the workspace rebuild. New in this session:
 - The Wine recipe's USERSTAR.BWD needs the header's third word = the largest chunk size, and the player's record has
   group 0, `+5` = 1, `+6` = 0 (tools/ref/mkuserstar.py). Without that the sim drops the file and shows vehicle 0.
 - Wine relocates HGSIM.DLL; read its base from /proc/<pid>/maps (tools/ref/origstate.py does).
+
+v0.7.2 traced the sim drawing's INFERRED items: detail levels (0x10090750), effects facing the eye (0x10037fcc),
+type-3 sequences' drawing and timing (0x10026610, 0x1008700c, 0x10001725), debris turning (0x100955b7), bounding
+spheres (0x10003326). DX5DRAW.DLL is now exported too (out/DX5DRAW.DLL.c, HG's own Direct3D plugin: textures are
+16-bit surfaces with a source colour key, 0x10005690) for the TEX alpha item. Still INFERRED in world.c: TEX alpha,
+multi-object records, oa / oc objects, block objects' y, PALG's palette, the shot streaks; the software luma's | 7
+is calibrated against a frame but conflicts with the trace (KNOWN_ISSUES).
 
 The original's shell runs under Wine too (RE_NOTES "Working Wine recipe" step 7): the gear editor's view was matched
 against it (refs: /home/claude/refs/b07_hunter.png). No INFERRED left in the shell / front end; not done: the debriefing's score list (0x100b9fad, the scoring 0x100df8e4, front_mission_over), the editor's

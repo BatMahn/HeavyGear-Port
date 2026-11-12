@@ -134,15 +134,17 @@ def main():
     print(' * the sound at +0x2c play, placed at the effect - once the effect has started (src/effects.h). life +0: ticks the')
     print(' * effect lasts (counted down by 0x1001c40d); flags +0x28: bit 0 it follows the struck vehicle, bit 1 no limit on')
     print(' * effects of the type close by; splash +0x18: it harms what is near it each frame, power +0x20 a tick (0x1001c40d ->')
-    print(' * 0x1001c75c / 0x1001c96a). */')
+    print(' * 0x1001c75c / 0x1001c96a). seq +0x1c: how the effect\'s texture sequence runs from its start (0x1001b3a1 ->')
+    print(' * 0x10001ffe; advanced by 0x10001725): 1 looping, 2 one pass, then frame 0. */')
     print('#define GEAR_EFFECTS 0x4d')
-    print('static const struct { int gate, chance; const char *sound; int life, flags, splash; float power; } gear_effect[GEAR_EFFECTS] = {')
+    print('static const struct { int gate, chance; const char *sound; int life, flags, splash; float power; int seq; } gear_effect[GEAR_EFFECTS] = {')
     for k in range(0x4d):
         e = va(0x1011b968 + k * 0x3c)
         g, c = struct.unpack_from('<ii', img, e + 8)
         nm = img[e + 0x2c:e + 0x3c].split(b'\0')[0].decode('latin1')
-        print('    {%d, %d, "%s", %d, %d, %d, %s},' % (g, c, nm, struct.unpack_from('<i', img, e)[0], struct.unpack_from('<i', img, e + 0x28)[0],
-                                                struct.unpack_from('<i', img, e + 0x18)[0], cf(struct.unpack_from('<f', img, e + 0x20)[0])))
+        print('    {%d, %d, "%s", %d, %d, %d, %s, %d},' % (g, c, nm, struct.unpack_from('<i', img, e)[0], struct.unpack_from('<i', img, e + 0x28)[0],
+                                                struct.unpack_from('<i', img, e + 0x18)[0], cf(struct.unpack_from('<f', img, e + 0x20)[0]),
+                                                struct.unpack_from('<h', img, e + 0x1c)[0]))
     print('};')
     voice_sets(img, va)
 

@@ -1,5 +1,6 @@
 #include "audio.h"
 
+#include "codecs.h"
 #include "fsutil.h"
 
 #include <SDL3/SDL.h>
@@ -62,6 +63,7 @@ typedef struct {
     long     frames;
     int      wav;           /* a WAV file: start is its data, frames its length */
     int      channels, rate, bits;
+    int16_t *pcm;           /* an MP3 / Ogg file decoded whole: frames x 2 at 44.1 kHz (src/codecs.h) */
 } music_src;
 
 static struct {
@@ -83,7 +85,13 @@ static int mus_read(music_src *m, float *out, int frames)
             m->at = 0;
             if (m->frames <= 0) break;
         }
-        if (m->wav) {
+        if (m->pcm) {
+            int n = frames - done;
+            if (n > m->frames - m->at) n = (int)(m->frames - m->at);
+            for (int i = 0; i < 2 * n; i++) out[2 * done + i] = m->pcm[2 * m->at + i] / 32768.0f;
+            m->at += n;
+            done += n;
+        } else if (m->wav) {
             int bps = m->bits / 8 * m->channels;
             int n = frames - done;
             if (n > (int)(sizeof buf / bps)) n = (int)(sizeof buf / bps);
@@ -301,6 +309,20 @@ static int open_wav_file(const char *path, music_src *m)
     return -1;
 }
 
+/* a music file: WAV, else MP3 or Ogg Vorbis (decoded whole, src/codecs.c) */
+static int open_music_file(const char *path, music_src *m)
+{
+    if (!open_wav_file(path, m)) return 0;
+    int16_t *pcm = NULL;
+    long n = codec_decode_file(path, &pcm);
+    if (n <= 0) { free(pcm); return -1; }
+    memset(m, 0, sizeof *m);
+    m->pcm = pcm;
+    m->frames = n;
+    m->channels = 2; m->rate = 44100; m->bits = 16;
+    return 0;
+}
+
 static void trim(char *s)
 {
     size_t n = strlen(s);
@@ -338,7 +360,7 @@ static int from_wavmap(const char *dir, int track, music_src *m)
             if (fs_find_ci(q, t, nq, sizeof nq)) { q[0] = 0; break; }
             snprintf(q, sizeof q, "%s", nq);
         }
-        if (q[0] && !open_wav_file(q, m)) ok = 0;
+        if (q[0] && !open_music_file(q, m)) ok = 0;
         break;
     }
     fclose(f);
@@ -349,10 +371,12 @@ static int from_music_dir(const char *dir, int track, music_src *m)
 {
     char md[1200], name[32], p[1200];
     if (fs_find_ci(dir, "music", md, sizeof md)) return -1;
-    const char *fmt[] = {"track%02d.wav", "track%d.wav"};
-    for (int i = 0; i < 2; i++) {
+    /* track02.wav / track2.wav, else the same names as .ogg / .mp3 (the port's addition: the original reads CD audio,
+     * or wavmap.ini's WAVs) */
+    const char *fmt[] = {"track%02d.wav", "track%d.wav", "track%02d.ogg", "track%d.ogg", "track%02d.mp3", "track%d.mp3"};
+    for (int i = 0; i < 6; i++) {
         snprintf(name, sizeof name, fmt[i], track);
-        if (!fs_find_ci(md, name, p, sizeof p) && !open_wav_file(p, m)) return 0;
+        if (!fs_find_ci(md, name, p, sizeof p) && !open_music_file(p, m)) return 0;
     }
     return -1;
 }
@@ -495,6 +519,7 @@ void audio_music_stop(void)
     if (!A.st) return;
     SDL_LockMutex(A.mx);
     if (A.mus.f) fclose(A.mus.f);
+    free(A.mus.pcm);
     memset(&A.mus, 0, sizeof A.mus);
     A.mus_on = 0;
     SDL_UnlockMutex(A.mx);

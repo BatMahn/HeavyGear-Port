@@ -56,14 +56,14 @@
   - Splash damage is traced (0x1001c75c / 0x1001c96a): every frame an explosion harms what is near by the frame's
     ticks x its power, truncated, so like the original's it depends on the frame rate; it reaches vehicles only from
     ground explosions (0x2c / 0x2d) unless the option at 0x1014a564 + 2 is on (no options screen yet: off,
-    INFERRED). Other vehicles' size (+0x53c) is taken as the model's standing height, structures' bounding spheres as
-    their boxes' (INFERRED). Wrecks stay where they fell but don't fall over. Their burning throws debris (traced, 0x100533d2 /
+    INFERRED). Other vehicles' size (+0x53c) is taken as the model's standing height (INFERRED); structures' bounding
+    spheres are the sim's (0x10003326). Wrecks stay where they fell but don't fall over. Their burning throws debris (traced, 0x100533d2 /
     0x1001ce0a / 0x1001ef21), with the port's own random numbers (the original's tables come from its C library's
-    rand() and an unknown seed); the chunks' turn order (yaw, pitch, roll) and their size (the model box's half
-    diagonal for the original's bounding sphere) are INFERRED.
+    rand() and an unknown seed); the chunks' turning and size are the original's (traced).
   - The effects (explosions, hit flashes, muzzle flashes, gear deaths, structures' explosions) come from the
-    original's pool and rules (traced, src/effects.h); they're turned to face the camera and drawn unlit, their
-    animation run from their start (INFERRED). The muzzle flash shows at the shot's start (the original fixes it to
+    original's pool and rules (traced, src/effects.h), turned to face the eye, drawn unlit and unfogged, their
+    animation one pass (or looping) from their start (traced). Not done: their alpha (200 of 255; drawn opaque), and
+    effects of a type sharing one animation (each runs its own). The muzzle flash shows at the shot's start (the original fixes it to
     the weapon on the vehicle, 0x100bd13f); the ground's spray of particles (0x1008514d) isn't done. The ground is
     taken to be what the original's hit test flags 0x800 (INFERRED).
   - Critical hits (traced, 0x1005b5c6, with the head's equipment flags): the arm-actuator, torso-twist and power-loss
@@ -164,7 +164,8 @@
 - SOFTWARE look:
   - Point lights aren't done. The fog's height term (`density` Y) isn't done.
   - Untextured (colour) materials keep their RGB colour (the luma path for them, row = L * colour >> 10, isn't done).
-  - The intensity's low three bits (| 7) are INFERRED, matched on mission 1's ground.
+  - The intensity's low three bits (| 7) are calibrated on mission 1's ground: the traced software path leaves them
+    clear, which lands one table row darker than the original's frame. The difference isn't traced yet.
   - Mission 1: near the start the original's ground shows more red, orange and grey-green texels than the port's
     (a different ground texture or mapping there; the luma row is the same).
   - Mission 10: near the start the original shows a smooth snow slope on the left where the port shows a steep ridge.
@@ -173,7 +174,10 @@
 - 3D look:
   - Mission 1: the shaded hill on the left is darker in the original (about 0.77 of the port's).
 - The sky colours' palette (PALG's first) is INFERRED.
-- Animated materials run on the clock (INFERRED); an effect's from its start.
+- Animated materials loop on the clock from the mission's start (the original starts each when it loads it; the
+  phase may differ). An effect's runs from its start (traced).
+- Software look: patch 1.2's effect textures have no XEL, which the original's software renderer would leave
+  undrawn; the port draws their TEX.
 - Mission 27's ground uses 45 tiles in MechWarrior 2's older layout. The game's float parser would reject them (their
   checksum fails), so the game probably doesn't draw them. hgview does.
 - The OBJ / BLKX fields are read from the data and match the screen, but the sim's object handler (HGSIM 0x100c1152)

@@ -4,6 +4,7 @@
 #include "tex.h"
 #include "wtb.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,9 +15,10 @@
 typedef struct {
     char           name[33];
     int            ok;
-    raster_texture rt;
+    raster_texture rt;      /* the 3D look's (TEX); rt.texels NULL when there's no TEX */
+    raster_texture srt;     /* the SOFTWARE look's (XEL, at its own size); srt.idx NULL when there's no XEL */
     uint32_t      *px;
-    uint8_t       *xel;     /* the software renderer's texels (XEL), or NULL */
+    uint8_t       *xel;
 } tex_entry;
 
 typedef struct {
@@ -25,6 +27,7 @@ typedef struct {
     float    nx, ny, nz;
     int      tex;      /* tex_entry index or -1 */
     int      anim;     /* an animated material (MLT type 3): its world anim index, -1 none */
+    int      seq;      /* MLT type 3 (an animated sequence, even of one frame): drawn unlit (draw kind 0x3000) */
     uint32_t color;    /* when untextured */
 } mesh_poly;
 
@@ -51,8 +54,9 @@ typedef struct {
     float rs, rc;      /* yaw sin / cos */
     int   ground;
     int   hidden;
-    int   fx;          /* an effect (world_add_effect): turned to face the camera, unlit, its animation from fx_age */
+    int   fx;          /* an effect (world_add_effect): turned to face the camera, its animation from fx_age */
     float fx_age;      /* ticks since the effect started */
+    int   fx_seq;      /* its sequence: 1 looping, 2 one pass then frame 0, 0 stopped (frame 0) */
     int   solid;       /* a mission object that stops shells (world_ray) */
     int   has_m;       /* a full turn (debris): m, rows of model -> world, instead of the yaw */
     float m[9];
@@ -100,21 +104,21 @@ static int load_texture(world *w, const char *name)
             e->px[i] = (al << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | p[0];
         }
         e->rt.w = t.w; e->rt.h = t.h; e->rt.texels = e->px;
-        e->ok = 1;
         tex_free(&t);
-        /* the SOFTWARE look's copy: XEL of the same name, used when it has the TEX's size */
-        size_t xl;
-        uint8_t *xd = hga_load(w->a, name, "XEL", &xl, NULL);
-        hg_texture x;
-        if (xd && !tex_parse_xel(xd, xl, &x)) {
-            if (x.w == e->rt.w && x.h == e->rt.h) { e->xel = x.idx; e->rt.idx = e->xel; }
-            else tex_free(&x);
-        }
-        free(xd);
-    } else {
-        w->missing++;
     }
     free(d);
+    /* The software renderer loads the XEL of the name (0x100021e1 / 0x1000189d: type "XEL", 0x1011fd48), whatever its
+     * size; a polygon whose texture has none isn't drawn (0x100012c5 / 0x10001513 give up on a NULL texture). */
+    size_t xl;
+    uint8_t *xd = hga_load(w->a, name, "XEL", &xl, NULL);
+    hg_texture x;
+    if (xd && !tex_parse_xel(xd, xl, &x)) {
+        e->xel = x.idx;
+        e->srt.w = x.w; e->srt.h = x.h; e->srt.idx = e->xel;
+    }
+    free(xd);
+    e->ok = e->px || e->xel;
+    if (!e->px) w->missing++;
     w->ntexs++;
     return e->ok ? w->ntexs - 1 : -1;
 }
@@ -155,6 +159,7 @@ static int load_mesh(world *w, const char *name)
             q->nx = g->nx; q->ny = g->ny; q->nz = g->nz;
             q->tex = -1;
             q->anim = -1;
+            q->seq = 0;
             q->color = 0xff808080u;
             /* label (upper-cased, 0x100ea690) -> TLT -> key -> MLT[key] -> texture = MLT name (+0x20, 0x100bef4c).
              * MLT types 0, 1, 4 are untextured (colour); 3 is an animated sequence (first frame drawn for now). */
@@ -167,7 +172,8 @@ static int load_mesh(world *w, const char *name)
                     if (me->type == 3) snprintf(nm, sizeof nm, "%s%s%u", me->name, me->p4c < 10 ? "0" : "", me->p4c);
                     else snprintf(nm, sizeof nm, "%s", me->name);
                     q->tex = load_texture(w, nm);
-                    if (me->type == 3 && me->p50 > me->p4c) q->anim = load_anim(w, me);
+                    if (me->type == 3) q->anim = load_anim(w, me);
+                    q->seq = me->type == 3;
                 }
             }
         }
@@ -193,7 +199,9 @@ static int load_anim(world *w, const mlt_entry *me)
         snprintf(nm, sizeof nm, "%s%s%u", me->name, f < 10 ? "0" : "", f);
         a->tex[a->n++] = load_texture(w, nm);
     }
-    a->ticks_per_frame = me->p54 ? (float)0xb5 / (float)me->p54 : (float)0xb5;
+    /* a frame every 0xb5 / rate ticks, in whole ticks (0x100bef4c: 0xb5 / +0x54, integer division) */
+    a->ticks_per_frame = me->p54 > 0 ? (float)(0xb5 / me->p54) : (float)0xb5;
+    if (a->ticks_per_frame < 1.0f) a->ticks_per_frame = 1.0f;
     return w->nanims++;
 }
 
@@ -236,6 +244,10 @@ static void load_lods(world *w, instance *in, const char *model)
     size_t len;
     uint8_t *d = hga_load(w->a, model, "SDF", &len, NULL);
     if (!d || len < 0x14c + 4 * MAX_LOD) { free(d); return; }
+    {
+        uint32_t u = (uint32_t)d[0x14c] | ((uint32_t)d[0x14d] << 8) | ((uint32_t)d[0x14e] << 16) | ((uint32_t)d[0x14f] << 24);
+        memcpy(&in->lod_dist[0], &u, 4);
+    }
     for (int n = 1; n < MAX_LOD; n++) {
         char nm[33];
         memcpy(nm, d + 0x0c + n * 0x20, 32);
@@ -522,7 +534,8 @@ static void draw_horizon(const world *w, raster_target *t, const camera *cam, fl
     float hy = (float)t->h * 0.5f - tanf(cam->pitch * PI_F / 180) * f;   /* the horizon's screen row */
     float band = 128.0f * (float)t->h / 480.0f;
     int ht = sw ? w->sw_horizon_tex : w->horizon_tex;
-    const raster_texture *tx = ht >= 0 ? &w->texs[ht].rt : NULL;
+    const raster_texture *tx = ht < 0 ? NULL : sw ? (w->texs[ht].xel ? &w->texs[ht].srt : NULL)
+                                              : (w->texs[ht].px ? &w->texs[ht].rt : NULL);
     float heading = fmodf(cam->yaw, 360.0f);
     if (heading < 0) heading += 360.0f;
     float u0 = 1.0f - heading / 360.0f * 8.0f;
@@ -553,7 +566,7 @@ static void draw_horizon(const world *w, raster_target *t, const camera *cam, fl
             for (int x = 0; x < t->w; x++) row[x] = c;
         }
     }
-    if (!sw && w->sky_tex >= 0 && s->found) {
+    if (!sw && w->sky_tex >= 0 && w->texs[w->sky_tex].px && s->found) {
         const raster_texture *st = &w->texs[w->sky_tex].rt;
         float h = cam->yaw * PI_F / 180.0f, sh = sinf(h), ch = cosf(h);
         float p = (45.0f + cam->pitch) * PI_F / 180.0f;   /* the engine's pitch is the port's negated */
@@ -630,8 +643,11 @@ static float software_luma(const world *w, const instance *in, const wtb_vertex 
     int row = L * 255 >> 10;
     if (row < 4) row = 4;
     if (row > 31) row = 31;
-    /* The intensity's low three bits: set as in the hardware path (0x100012c5: << 3 | 7). INFERRED for this path; with
-     * them mission 1's flat ground (row 18) reaches table row 19, as on the original's frame. */
+    /* The intensity's low three bits. Traced: the software branch of 0x100012c5 (0x1014a5e8 == 0) hands I76DRAW
+     * row << 3 with them clear (the 3D branch sets them: << 3 | 7), and I76DRAW's mode-2 rasterizer (0x10002650)
+     * rounds (1 - i / 255) * 7936 to nearest and takes the high byte - so row 18 gives index 13, table row 18. But the
+     * original's frame showed mission 1's flat ground (row 18) at table row 19, which | 7 reproduces; the port keeps
+     * | 7 (CALIBRATED against that frame; something between the two isn't traced yet - KNOWN_ISSUES). */
     float f = (float)(row << 3 | 7) / 255.0f;
     return (1.0f - f) * 31.0f;
 }
@@ -659,17 +675,38 @@ void world_draw(world *w, raster_target *t, const camera *cam)
         if (in->hidden) continue;
         float dx = in->x - cam->x, dz = in->z - cam->z;
         if (!in->ground && dx * dx + dz * dz > far2 * far2) continue;
-        /* detail level: the last whose switch distance the camera is beyond (distance measure INFERRED: ground plane) */
+        /* detail level (0x10090750): the last level whose switch distance, times the view's detail scale, the
+         * object's depth reaches. The depth is the object's bounding-box centre along the view direction (0x10078797:
+         * (centre - eye) . forward); the scale is (focal length) / (160 * detail), detail 1 (high, 0x101244f8) or
+         * 2 (0x100b8496: +0xb8 = half width * zoom / (detail * 160), half width * zoom being +0x94, the focal length). A first level with distance 0 never switches. */
         int mi = in->mesh;
-        float dist = sqrtf(dx * dx + dz * dz);
-        for (int k = 1; k < in->nlod; k++)
-            if (dist >= in->lod_dist[k]) mi = in->lod_mesh[k];
+        if (in->nlod > 1 && in->mesh >= 0 && in->lod_dist[0] != 0.0f) {
+            const mesh *m0 = &w->meshes[in->mesh];
+            float c[3] = {(m0->min[0] + m0->max[0]) * 0.5f, (m0->min[1] + m0->max[1]) * 0.5f,
+                          (m0->min[2] + m0->max[2]) * 0.5f}, cw[3];
+            if (in->has_m) {
+                for (int a = 0; a < 3; a++) cw[a] = in->m[a * 3] * c[0] + in->m[a * 3 + 1] * c[1] + in->m[a * 3 + 2] * c[2];
+            } else {
+                cw[0] = c[0] * in->rc + c[2] * in->rs; cw[2] = -c[0] * in->rs + c[2] * in->rc; cw[1] = c[1];
+            }
+            float px = cw[0] + in->x - cam->x, py = cw[1] + in->y - cam->y, pz = cw[2] + in->z - cam->z;
+            float depth = py * sp + (px * sy + pz * cy) * cp, scale = f / 160.0f;
+            for (int k = 1; k < in->nlod; k++)
+                if (depth >= scale * in->lod_dist[k]) mi = in->lod_mesh[k];
+                else break;
+        }
         if (mi < 0) continue;
         const mesh *ms = &w->meshes[mi];
         vview *vv = malloc((size_t)ms->nverts * sizeof *vv);
-        /* effects: the models are flat quads (x, y) - turned about y to face the view (INFERRED: how the original
-         * keeps them facing the camera isn't traced) */
-        float irc = in->fx ? cy : in->rc, irs = in->fx ? sy : in->rs;
+        /* effects: the models are flat quads (x, y) facing +z. Every frame the sim turns each visible effect (and
+         * the other objects of render types 0x10 / 0x60) about y towards the eye (0x10037fcc: yaw =
+         * atan2(eye x - x, eye z - z), 0x1006f4ee; pitch 0), so the quad's face points at the camera's position. (In
+         * view mode 4 they get yaw 180, pitch -45 instead; the port has no such view.) */
+        float irc = in->rc, irs = in->rs;
+        if (in->fx) {
+            float ex = cam->x - in->x, ez = cam->z - in->z, r = sqrtf(ex * ex + ez * ez);
+            if (r > 0.0f) { irs = ex / r; irc = ez / r; } else { irs = 0.0f; irc = 1.0f; }
+        }
         for (int j = 0; j < ms->nverts; j++) {
             const wtb_vertex *v = &ms->v[j];
             /* model -> world: yaw about y (or the full turn), then translate */
@@ -695,13 +732,22 @@ void world_draw(world *w, raster_target *t, const camera *cam)
             for (int k = 0; k < q->n; k++) {
                 const wtb_vertex *mv = &ms->v[q->idx[k]];
                 pin[k] = vv[q->idx[k]];
-                if (in->fx) {   /* full bright (INFERRED) */
+                if (q->seq) {
+                    /* an animated sequence's polygon (MLT type 3, draw kind 0x3000): the shading step passes its
+                     * word through unlit (0x10026610), and it is drawn by 0x1008700c: the vertex colour the view's
+                     * tint (0x10118198: white, green in night vision), intensity 0x80 in software (table row 16,
+                     * the identity row) and 0xff in 3D, no fog (+0x18 = 0xff000000), each u / v put at 0.01 or
+                     * 0.99 by which side of 0.5 it is (so a frame is drawn whole). Its alpha byte is 200 (+0x17);
+                     * the port draws it opaque. */
                     pin[k].lr = pin[k].lg = pin[k].lb = 1.0f;
-                    pin[k].lum = 0.0f;
-                } else {
-                    light_vertex(w, in, mv, &pin[k]);
-                    pin[k].lum = sw_look ? software_luma(w, in, mv, pin[k].z) : 0.0f;
+                    pin[k].lum = (1.0f - 128.0f / 255.0f) * 31.0f;
+                    pin[k].u = pin[k].u <= 0.5f ? 0.01f : 0.99f;
+                    pin[k].v = pin[k].v <= 0.5f ? 0.01f : 0.99f;
+                    pin[k].f = 1.0f;
+                    continue;
                 }
+                light_vertex(w, in, mv, &pin[k]);
+                pin[k].lum = sw_look ? software_luma(w, in, mv, pin[k].z) : 0.0f;
                 if (fog_on) {
                     float dd = pin[k].z;
                     pin[k].f = dd <= fog_near ? 1.0f : dd >= fog_far ? 0.0f : 1.0f - (dd - fog_near) / (fog_far - fog_near);
@@ -723,12 +769,29 @@ void world_draw(world *w, raster_target *t, const camera *cam)
             int ti = q->tex;
             if (q->anim >= 0) {
                 const world_anim *a = &w->anims[q->anim];
-                /* an effect's sequence from its start (INFERRED: its life is one pass, e.g. EXPLSION's 14 frames
-                 * over the explosion's 181 ticks); others by the clock */
+                /* An effect restarts its record's sequence at frame 0 when it starts (0x1001b3a1: 0x1000204c, then
+                 * 0x10001ffe with its type's mode); the sequences step a frame every 0xb5 / rate ticks
+                 * (0x10001725). Mode 1 loops; mode 2 makes one pass and then stops (mode 0), and a stopped
+                 * sequence's polygons aren't drawn (0x100021e1 hands back no texture), so the effect vanishes. Other
+                 * sequences loop by the clock (0x100bef4c starts them in mode 1). (In the original all effects of a
+                 * type share their record's sequence, so a new one restarts the others' too; here each keeps its
+                 * own.) */
                 long fr = (long)((in->fx ? in->fx_age : w->sky_ticks) / a->ticks_per_frame);
+                if (in->fx && (in->fx_seq == 0 || (in->fx_seq == 2 && fr >= a->n))) continue;
                 ti = a->tex[fr % a->n];
             }
-            const raster_texture *tx = ti >= 0 ? &w->texs[ti].rt : NULL;
+            const raster_texture *tx = NULL;
+            if (ti >= 0) {
+                if (sw_look) {
+                    /* No XEL: the software renderer draws nothing. Patch 1.2 retextured the effects (gearxpl1.mlt:
+                     * FXBOOM, FXFIRE ... as TEX only), which would leave them invisible here, so the port draws the
+                     * TEX instead (a port choice, not the original's behaviour). */
+                    tx = w->texs[ti].xel ? &w->texs[ti].srt : w->texs[ti].px ? &w->texs[ti].rt : NULL;
+                    if (!tx) continue;
+                } else {
+                    tx = w->texs[ti].px ? &w->texs[ti].rt : NULL;
+                }
+            }
             for (int k = 1; k + 1 < m; k++) raster_triangle(t, &rv[0], &rv[k], &rv[k + 1], tx, q->color);
         }
         free(vv);
@@ -775,34 +838,21 @@ int world_add_effect(world *w, const char *model)
     return id;
 }
 
-void world_set_effect(world *w, int id, int on, float x, float y, float z, float age_ticks)
+void world_set_effect(world *w, int id, int on, float x, float y, float z, float age_ticks, int seq)
 {
     if (id < 0 || id >= w->ninst) return;
     instance *in = &w->inst[id];
     in->hidden = !on;
     in->x = x; in->y = y; in->z = z;
     in->fx_age = age_ticks;
+    in->fx_seq = seq;
 }
 
-void world_turn_object(world *w, int id, float yaw, float pitch, float roll)
+void world_set_object_matrix(world *w, int id, const float m[9])
 {
     if (id < 0 || id >= w->ninst) return;
     instance *in = &w->inst[id];
-    /* yaw about y, pitch about x, roll about z: R = Ry * Rx * Rz (INFERRED order) */
-    float a = yaw * PI_F / 180.0f, b = pitch * PI_F / 180.0f, c = roll * PI_F / 180.0f;
-    float ca = cosf(a), sa = sinf(a), cb = cosf(b), sb = sinf(b), cc = cosf(c), sc = sinf(c);
-    float ry[9] = {ca, 0, sa, 0, 1, 0, -sa, 0, ca};
-    float rx[9] = {1, 0, 0, 0, cb, -sb, 0, sb, cb};
-    float rz[9] = {cc, -sc, 0, sc, cc, 0, 0, 0, 1};
-    float t[9];
-    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) {
-        t[i * 3 + j] = 0;
-        for (int k = 0; k < 3; k++) t[i * 3 + j] += ry[i * 3 + k] * rx[k * 3 + j];
-    }
-    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) {
-        in->m[i * 3 + j] = 0;
-        for (int k = 0; k < 3; k++) in->m[i * 3 + j] += t[i * 3 + k] * rz[k * 3 + j];
-    }
+    for (int k = 0; k < 9; k++) in->m[k] = m[k];
     in->has_m = 1;
     in->fx = 0;   /* a solid object: lit, not turned to the view */
 }
@@ -821,6 +871,29 @@ int world_object_bounds(const world *w, int id, float mn[3], float mx[3])
     const mesh *ms = &w->meshes[w->inst[id].mesh];
     for (int k = 0; k < 3; k++) { mn[k] = ms->min[k]; mx[k] = ms->max[k]; }
     return 0;
+}
+
+float world_object_radius(const world *w, int id, float centre[3])
+{
+    if (id < 0 || id >= w->ninst || w->inst[id].mesh < 0) return 0;
+    const mesh *ms = &w->meshes[w->inst[id].mesh];
+    float c[3], r2 = 0;
+    for (int k = 0; k < 3; k++) c[k] = (ms->min[k] + ms->max[k]) * 0.5f;
+    for (int j = 0; j < ms->nverts; j++) {
+        float dx = ms->v[j].x - c[0], dy = ms->v[j].y - c[1], dz = ms->v[j].z - c[2], d = dx * dx + dy * dy + dz * dz;
+        if (d > r2) r2 = d;
+    }
+    float r = sqrtf(r2);
+    if (ms->name[0] == 'w' || ms->name[0] == 'W') r /= 2.0f;
+    else {
+        char up[sizeof ms->name];
+        size_t k = 0;
+        for (; ms->name[k] && k + 1 < sizeof up; k++) up[k] = (char)toupper((unsigned char)ms->name[k]);
+        up[k] = 0;
+        if (strstr(up, "ENBP")) r /= 1.5f;
+    }
+    if (centre) for (int k = 0; k < 3; k++) centre[k] = c[k];
+    return r;
 }
 
 /* Shots in flight: a short streak from each point back along its motion, depth-tested (INFERRED look: the original

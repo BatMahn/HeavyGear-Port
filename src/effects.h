@@ -25,13 +25,14 @@ typedef struct {
     /* make an effect object of a model (hidden); its handle, or -1 */
     int  (*add)(void *ctx, const char *model);
     /* show / hide it, where, and how many ticks it has run (for its animation) */
-    void (*set)(void *ctx, int h, int on, float x, float y, float z, float age);
+    /* age: ticks since the start; seq: how its texture sequence runs (gear_effect[].seq: 1 loops, 2 one pass) */
+    void (*set)(void *ctx, int h, int on, float x, float y, float z, float age, int seq);
     /* where a followed vehicle is (0: gone) */
     int  (*vehicle_pos)(void *ctx, int unit, float p[3]);
     /* debris: the ground's height, an object's size (its bounding sphere's radius) and its turn (degrees) */
     float (*ground)(void *ctx, float x, float z);
     float (*radius)(void *ctx, int h);
-    void (*turn)(void *ctx, int h, float yaw, float pitch, float roll);
+    void (*turn)(void *ctx, int h, const float m[9]);
     /* an explosion's harm (0x1001c75c / 0x1001c96a): to what is within `radius` (plus its own size) of the point,
      * `power` (already times the ticks); vehicles only when `vehicles` */
     void (*splash)(void *ctx, int owner, float x, float y, float z, float radius, float power, int vehicles);
@@ -42,7 +43,7 @@ typedef struct {
     float x, y, z;
     int   left, age;
     int   body;            /* debris in flight (0x107f74a0's bodies) */
-    float v[3], w[3], rot[3], r;
+    float v[3], w[3], m[9], r;   /* w: the turn a tick about x, y, z (degrees); m: the orientation */
 } fx_slot;
 
 typedef struct { float x, y, z; int left; } fx_burn;

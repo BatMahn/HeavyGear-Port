@@ -2,6 +2,30 @@
 
 Heavy Gear native port by BatMahn - https://github.com/BatMahn/HeavyGear-Port
 
+## v0.7.2 (2026-11-11)
+
+Fewer guesses in the sim's drawing: these were INFERRED and are now traced from HGSIM.
+- **Detail levels** switch as the original's (0x10090750): by the object's depth along the view, against the SDF's
+  distances times the view's detail scale (focal length / 160), with a first level of 0 never switching.
+- **Effects face the eye** the original's way (0x10037fcc): turned about y towards the camera's position each frame.
+- **Animated-sequence polygons** (explosions, fires, muzzle flashes, any MLT type 3) are drawn unlit and unfogged,
+  table row 16 in the software look, each frame whole (0x10026610 / 0x1008700c). An effect's animation restarts at
+  its start and makes one pass (then the effect is no longer drawn) or loops, by the effect table's mode; frames step
+  every 0xb5 / rate whole ticks.
+- **Debris tumbles** as the original's (0x100955b7): an incremental quaternion turn each tick, Z * (X * Y).
+- **Bounding spheres** are the sim's (0x10003326: box centre, farthest point; halved for w... models), for debris on
+  the ground, effects' splash radius and structures caught in it.
+- Software look: textures come from their XEL at the XEL's own size; patch 1.2's effects (TEX only) fall back to the
+  TEX, and the nearest-texel path uses the same alpha test as the filtered one (no more black squares around them).
+- RE_NOTES: detail levels, effects facing / sequences / drawing, the software rasterizer's luma rounding.
+
+## v0.7.1 (2026-11-11)
+
+- **The soundtrack from Ogg Vorbis or MP3** as well as WAV: `music/track02.ogg` / `track02.mp3` ... (any bit rate or
+  sample rate), and in `wavmap.ini`. Decoded with dr_mp3 and stb_vorbis (src/third_party/, THIRD_PARTY.md).
+- The macOS release builds on GitHub's macos-15 runners (macos-14 is retired).
+- README: setting up the game folder from the two CDs without installing the game, and the music.
+
 ## v0.7.0 (2026-11-11)
 
 - **The sim's sounds.** Shots, hits and impacts are heard where they happen: the original's volume by distance, its

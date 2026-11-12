@@ -55,7 +55,7 @@ jobs:
           path: dist/hg-port-linux-x86_64.tar.gz
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Build

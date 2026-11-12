@@ -10,6 +10,7 @@
 #ifndef HG_SHELL_H
 #define HG_SHELL_H
 
+#include "debrief.h"
 #include "hgprj.h"
 
 #include <stdint.h>
@@ -27,15 +28,23 @@ const char *shell_mouse(shell *s, int x, int y, int down);
 /* the campaign table entry (0x101ace60; 1..32 the story's missions, 35..38 training) the briefing screens show;
  * loads its BRF. 0 on success. */
 int    shell_set_mission(shell *s, int entry);
+
 int    shell_mission(const shell *s);
 /* the loaded briefing (NULL without one) */
 const struct hg_brf_s *shell_brf(const shell *s);
+/* the briefing given (the random mission's, src/randmsn.h) for campaign entry `entry` */
+void   shell_set_brf(shell *s, int entry, const struct hg_brf_s *b);
+/* the briefing maps' front line from the game record (FUN_10112881: the record's +0x324, the story's table copied in
+ * for the story); NULL goes back to the campaign entry's table */
+void   shell_set_front(shell *s, const float *ys);
 /* the last mission's outcome for the debriefing: 2 accomplished, 1 failed */
 void   shell_set_outcome(shell *s, int outcome);
 /* the debriefing's statistics text (lines split by '\n') */
 void   shell_set_stats(shell *s, const char *text);
 /* the debriefing's objectives list (lines split by '\n') */
 void   shell_set_objectives(shell *s, const char *text);
+/* the debriefing's score list (src/debrief.h; drawn as HGSHELL 0x100b9fad) */
+void   shell_set_score(shell *s, const debrief_list *l);
 /* the briefing's squad panel: the wingmen's names, portrait pictures (-1 none) and gear names, and the player's gear */
 void   shell_set_squad(shell *s, const char *name1, int face1, const char *gear1, const char *name2, int face2,
                        const char *gear2, const char *player_gear);
@@ -44,11 +53,21 @@ void   shell_set_squad(shell *s, const char *name1, int face1, const char *gear1
 void   shell_set_briefing_gear(shell *s, const unsigned char *gdf, size_t len, const char (*extra)[9],
                                const float place[3], const char *const *weapons, int nweapons);
 void   shell_briefing_gear_turn(shell *s, float turn);
+/* the briefing's gear is over the game's level: drawn dark under the priority message (FUN_1008f502) */
+void   shell_briefing_gear_dark(shell *s, int dark);
 /* the gear editor (B07): the category button shown selected ("B07TRSO"), the left list's items from its first
  * shown, the design's name and its GDF in memory (drawn in the view, src/modelview.h; extra: models drawn at
  * records besides the GDF's, modelview_set_data) */
 void   shell_set_garage(shell *s, const char *cat, const char *const *items, int n, const char *gear,
                         const unsigned char *gdf, size_t len, const char (*extra)[9]);
+/* the left list's items' equipment ids (their pictures, src/garagepic.h), from the first shown */
+void   shell_garage_ids(shell *s, const int *ids, int n);
+/* the editor's statistics panel: the combat priority line, the design's weapons (short names, colours) and the text */
+void   shell_garage_panel(shell *s, const char *priority, const char *const *weapons, const int *colour, int n,
+                          const char *stats);
+/* the list's turner (src/garagepic.h): on while the editor is up, every item of the category's list (ids, n) but the
+ * dragged one (its id, -1 none) turns by the time since the last call */
+void   shell_garage_spin(shell *s, int on, const int *ids, int n, int dragged, uint64_t ms);
 /* the gear editor's view: the root object's place and its turn about y, degrees (src/modelview.h) */
 void   shell_garage_view(shell *s, const float place[3], float turn);
 /* the left list's item at (x, y), counted from the first shown; -1 none */
@@ -61,6 +80,8 @@ int    shell_garage_screen(shell *s, int rec, float *x, float *y);
 const char *shell_mission_scenario(const shell *s);
 /* a button of the screen not shown (until the next shell_goto) */
 void   shell_hide(shell *s, const char *stem);
+/* shown again (the control's show, after shell_hide) */
+void   shell_show(shell *s, const char *stem);
 /* a button disabled (off 1) or enabled again (the control's +0x48 / +0x4c): drawn with its D art, not clickable */
 void   shell_disable(shell *s, const char *stem, int off);
 /* a popup over the screen (B19UNDER, B72UNDER: FUN_10028f08), placed at its *LOC* record; it takes the mouse */
@@ -78,7 +99,13 @@ enum { SHELL_KEY_BACKSPACE = 8, SHELL_KEY_LEFT = 0x25, SHELL_KEY_RIGHT = 0x27, S
 void   shell_key(shell *s, int key);
 void   shell_char(shell *s, int ch);
 /* a text in a rectangle (FUN_100140a7) */
+/* up to SHELL_AREAS more text areas (the multiplayer screens' lists, rosters and chat), cleared on each screen */
+#define SHELL_AREAS 8
+int    shell_area_set(shell *s, int slot, int x0, int y0, int x1, int y1, int colour, const char *text);
 int    shell_box_set(shell *s, int x0, int y0, int x1, int y1, const char *text);
+/* further text boxes (FUN_100140a7, font 9, colour 0xfe) by slot k; NULL text takes the box away; cleared with the screen */
+#define SHELL_TBOXES 6
+int    shell_tbox_set(shell *s, int k, int x0, int y0, int x1, int y1, const char *text);
 /* draw into 640 x 480 ARGB */
 void   shell_draw(shell *s, uint32_t *out);
 /* the screen's animations: advance to time ms; play slot with a mode (FUN_100323c3); is a mode-3 one still playing? */
@@ -86,5 +113,13 @@ void   shell_anim_tick(shell *s, uint64_t ms);
 void   shell_anim_play(shell *s, int slot, int mode);
 int    shell_anim_busy(const shell *s);
 const char *shell_anim_name(const shell *s, int slot);
+
+/* a spinner's current item (the options screen: stem "B64DI" draws in B64DISPN's inner rectangle) */
+void   shell_set_spinner(shell *s, const char *stem, const char *text);
+/* the credits' text (B67) and how far it has scrolled up, in pixels */
+void   shell_set_credits(shell *s, const char *text, int dy);
+/* the barracks' contents (B03; src/barracks.h); NULL clears */
+struct shell_barracks_s;
+void   shell_set_barracks(shell *s, const struct shell_barracks_s *b);
 
 #endif

@@ -104,7 +104,9 @@ Parser: 0x100c5e73, called through 0x100c5e01.
 
 - TEX (hardware renderers): "1.22", u16 type, u16 w, u16 h, u16 n, n x 4-byte palette (B, G, R, A), w*h indices. All 2,255
   files check, archive and patch alike. Sizes: 64x64 (1,651), 256x256 (305), 128x128 (189, mostly patch 1.2 upgrades) and
-  32x32. Types: 0 (1,936), 3 (317), 1 (2). This is the Titanium edition's format.
+  32x32. Types: 0 (1,936), 3 (317), 1 (2). This is the Titanium edition's format. DX5DRAW makes a 4444 surface of it
+  when `+0x18` is 1 (hardware): alpha = 15 - (A >> 4); render mode 8 blends SRCALPHA / INVSRCALPHA. Every type-0
+  file's A is 0 (opaque).
 - XEL (software renderer): u16 w, u16 h, w*h palette indices. The DOS-style CEL.
 - PCX: ordinary 8-bit RLE PCX (shell art, 640x480).
 
@@ -127,10 +129,14 @@ Parser: 0x100c5e73, called through 0x100c5e01.
   - i32 rot[3]: 16.16 fixed **degrees** (0x5a0000 = 90)
   - i32 offset[3], 8 bytes
   - char model[10] at `+0x32`
-  These fields are INFERRED from the data and confirmed on screen; HGSIM 0x100c1152 is still to be traced.
-- BLKX (36 bytes) starts a placed block: i32 x, y, z at `+0x18`. The OBJ offsets inside it are relative to that position.
-  Every block in mission 1 has y = -4150 while its objects carry small negative y offsets. The viewer stands block objects
-  on the ground plus their own y offset (INFERRED; matches the screen).
+  - u16 flags at `+0x2c` (the original's record `+0x34`, copied to the sim object's `+2` by 0x100c058b): 0x800 on
+    every ground tile and some rocks (a shot striking it gets 0x400 and throws a spray, 0x100191d7); 0x10..0x80 others.
+  The rest of the fields are from the data, confirmed on screen.
+- BLKX / BLK / ENDB (0x100c1152, traced): BLKX gives the block's scale, turn (16.16 degrees) and position; BLK its
+  box (x0, y0, z0, w, h, d). The block's matrix is T(centre) . T(pos) . R . T(-centre), nested by ENDB; an object
+  inside is world = Mblock . Mobj (rotation 0x10051fb0 order 0: Ry . Rx . Rz). A parentless block object whose world y
+  is below 0 is stood on the ground's height there (0x1009de8e, 0x10022591); "BOLD" boulders are also aligned to the
+  ground's slope (not done).
 - Ground tiles (xxx_GRND) are OBJs in a plain BLK with their world coordinates in the model itself.
 - Object models come as triples (`o_1tents`, `oa1tents`, `oc1tents`). Models whose name starts with 'o' load an **SDF**
   record of the same name (the type string at 0x10122d50 is "SDF", in the 0x100c1152 loader). The SDF holds up to 10 model
@@ -144,7 +150,7 @@ Parser: 0x100c5e73, called through 0x100c5e01.
     forward, the forward axis at 0x10152e98).
   - `oc` objects (second letter 'c', special-cased by the loader): the names are the collapse animation frames
     (oC1..oC8).
-  - `oa` objects: the remains (INFERRED from the names).
+  - `oa` objects: the remains, shown in place of the GT's object once destroyed (0x1009d8f2 / 0x1009d97e, traced).
   - OBJ nodes: `oa1` is a root (`+4` = 7), `oc1` is its child (parent = oa1's index), `o_1` is a separate root (`+4` = 0).
   The viewer shows the `o_` object with its detail levels and leaves the destroyed states out until destruction is
   implemented.
@@ -284,8 +290,9 @@ Drawn first each frame, for both looks:
 
 ## Palettes and luma tables
 
-- COL: 256 x RGB, 6-bit VGA values. The mission ART record's PALG chunk lists 20 palette names; the first is the
-  normal one.
+- COL: 256 x RGB, 6-bit VGA values. The mission ART record's PALG chunk lists 20 names x 16 bytes (slots
+  0x10152920); the one used is the time of day's slot (table 0x10110060 = {4, 0, 4, 8}) for INIT `+0x10`, the
+  starting time of day; PLNT `+0x14` is the day's length. Every mission resolves to newfog05.
 - TBL (luma, the software renderer): 32 rows x 256 entries (8,192 bytes). Row 0 is all one colour (full fog); the
   rows run up through a near-identity row (16). LTBL in the ART record names the mission's (`m01fog01`).
 
@@ -532,7 +539,7 @@ use tracks 2-9; the game CD has audio tracks 2-12. The shell itself plays no mus
   A group's formation by name (0x100424be, case-insensitive): GRP chunks (0x100c0005, 16 names of 0x11) and STAR
   chunks (0x100bfeee: per group 0x18 bytes, `+4` the group's side, `+8` the formation name; /OE= and /OF= on the
   command line override it). A vehicle's slot is its order within its group (the GPS loader's per-group counter,
-  0x107c8ee4; INFERRED from the decompile). Mission 1's groups all fly "Star".
+  0x107c8ee4; traced: 0x100425c9, see "Vehicle slots"). Mission 1's groups all fly "Star".
 - Sides: STAR `+4` (0x107c8ef4, read by 0x10042b07). Mission 1: 0 for the player's group, the Orca and the
   Redjackets, 1 for the rest.
 - Heights: on the ground at the standing height (the SOL_ point), except the vehicle class 5 (the Orca), which starts
@@ -612,7 +619,8 @@ use tracks 2-9; the game CD has audio tracks 2-12. The shell itself plays no mus
   `+0x67` / `+0x6b` start / end, `+0xee` target count, `+0xef` targets (index, kind)).
 - Targets (0x10066794, as each chunk loads inside a BTAG): navpoints (kind 1; NAVP `+0x1a` mask), vehicles (2; GPS
   `+0x18` flags) and structures (4; GT `+0x12`), masks widened by 0x100c1120, matched by BTAG name and mask, 0x28 per
-  objective at most. The player's own record (USERSTAR, flags 0x4006 from the shell) is a vehicle target too.
+  objective at most, in the order the chunks are read (NAVP, GPS and GT as they come; USERSTAR where its INCL is).
+  The player's own record (USERSTAR, flags 0x4006 from the shell) is a vehicle target too.
 - Time: sim seconds of 181 ticks (0x1028fc10 = clock / 0xb5).
 - Each objective steps (0x100684db) when active (0x100683d6: not done, conditions met; 0x10 and 0x8000..0x8002
   always): 1 / 2 every target destroyed (vehicle `+0x18` & 0xe, structure `+0` & 0xe); 4 a target destroyed fails
@@ -1094,7 +1102,827 @@ use tracks 2-9; the game CD has audio tracks 2-12. The shell itself plays no mus
   (32000 or 0: can't be destroyed; negative: |hp| and a flag), `+0x12` the target mask, `+0x18` its name. Kept in the
   object table at 0x107f2540 (0x50 bytes each: `+0` flags, `+0xc` hit points).
 - A shell striking it takes the shell's power off its hit points (polygons flagged 0xb0 destroy it outright); at 0
-  it's destroyed (0x1001caf9 -> 0x1009db64 swaps the model).
+  it's destroyed (0x1001caf9 -> 0x1009db64 swaps the model): 0x1009d8f2 links the OBJ to the 'oa' one and hides that
+  (0x800); the swap shows it, children following their parent (0x1009dc4d). Only the first (obj, alt) pair counts.
+- Its explosion (0x1001cc6c): a negative hit points value sets flag 1 when |hp| is odd, 2 when even (0x100c1152); flag
+  1 explodes as effect 0x24, flag 2 as 0x16, neither as 0x32 (an 0xb0 polygon's kill: 0x24).
+
+## The story's progress (traced: HGSHELL 0x100df8e4, the debriefing) - src/front.c front_mission_over
+
+- stat 11 = stat 12 (the mission played). A story game (0x1011178a: type 2) with HGCAR `+0x10` = 2 (success): stat
+  10 (reached) + 1 when it equals the mission played and is below 0x20; then stat 12 + 1 while below stat 10.
+  Otherwise 0x100bae59(1) (the failure path).
+
+## Vehicle slots (traced: 0x100c540d / 0x100c546b -> 0x100425c9)
+
+- A vehicle's `+0x10` (its slot, what 0x1000edfa looks up for the squad's mates) is its group's count of vehicles so
+  far (group table 0x107c8ee4 + group x 0x6c), counted up as the GPS chunks are read; the first class 2 / 8 vehicle
+  (the 0x1010b5a8 record's `+0`) of the player's group (0x10110e58, set by the player's GPS, `+0xe` = 0) takes slot 4
+  instead, uncounted.
+
+## Destroyed zones by class (0x1005ab68)
+
+- The head (1) destroys classes 1 / 9 (gears, infantry); any other vehicle only loses the part (0x100964e4). Zones 2
+  and 7 destroy 3, 4 and 1, then fall into the default (the vehicle destroyed unless its state is 4 / 5). Legs: +0x500
+  = 0 (stopped) for all; gears and infantry fall (0x562 bits 4 / 0x400) and crawl.
+
+## The view (0x1003719d)
+
+- 0x101316ec is the view: command 0x14 toggles 0 (the cockpit) and 1 (outside); 3 is 0x1001ca8a's camera. The impact
+  effects' sound rule (quiet unless the player is struck) reads it as the cockpit view.
+
+## The AI: engage test, fire control, speeds (traced: 0x1000a223, 0x1000a52e, 0x100ac524, 0x100a7e40, 0x10005300 / 0x10005a87 / 0x10005570, 0x10006672, 0x1000b9d3) - src/units.c
+
+- GPS record (q = chunk data) to vehicle (0x100c1152 copies q+8 .. q+0x17 to +0x184; 0x1000a223 unpacks): q+8 byte
+  -> +0x1b2 (0 read as 1, then + 1: the decision range), q+0xa / 0xc / 0xe u16 -> +0x1ce / +0x1c6 / +0x1ca (x 100,
+  0 read as 250), q+0x10 -> +0x1b3 (0 -> 1), q+0x12 -> +0x1b4 (a mode 0 / 1 / 2 -> +0x1d8.. in 0x1000a52e), q+0x14 ->
+  +0x1b5 (the skill row, 0 -> 5), q+0x16 -> +0x1b6 (the voice). The shell's USERSTAR records leave them 0.
+- The skill table (0x10107c0c -> 0x10107b08, rows of 0x1c, 0x1000a52e): +0 a pointer (gears only), +4 a range
+  (+0x274; 15000 if 0), +8 (+0x1be), +0xc a heat percentage (+0x1e0 = (int)(v / 100 x 65)), +0x10 the lock
+  percentage (+0x1e4), +0x14 (+0x1ec), +0x18 (+0x1f0). Rows 0..8: range 0 / 20000 / 20000 / 15000 / 15000 / 25000 /
+  15000 / 25000 / 30000; +8 0 0 1 2 2 0 0 0 0; heat 75 75 100 75 75 75 80 75 75; lock 25 25 15 25 60 100 85 25 35;
+  +0x14 only row 3; +0x18 rows 6 and 8.
+- The engage test (0x100ac524, single play): 0x100ac328 - the player, of another side (0x10042b07), within 15000
+  (0x1010370c), and 0x1000510e(player, this): the player's facing (+0x64 + torso +0x70) within 90 degrees of the
+  bearing (outside 90 .. 270 of the difference + 360) and the ray along the player's aim (0x100bcf44: from its +0x48
+  node, 150000 long) striking this vehicle first, or nothing while the player's target (+0xec) is it; else
+  0x100ac1e0 - a vehicle from its attackers' list (0x100ac127, +0x208) that targets it (+0xec or +0x1a6), within
+  15000, whose own aim ray (0x10004d60, gated the same way) strikes it first or nothing.
+- The attack state (0x100a7e40): the turn (0x1000d679) = 819.2 x (the bearing - the heading) / 45, held to +-819.2
+  (the control's +0xc, of 1024); the throttle (0x1000d2bd, control +8 in 1/64 units) toward the middle of the selected
+  weapon's band ((+0x4c + +0x50) x 0.5, 5000 with none: 0x100a7d9b): beyond twice it 1/64, from it to twice it
+  0.0125, nearer 0; classes 2 / 8 always 1/64; turning harder than 45: 1/64 - |turn| / 1.5 / 65536 (at least
+  0.0015625); heat above 65 halves it; below 0.0015625 0. Skating / crouched gears take other values (0.0039 ..).
+  A gear that didn't fire and whose aim ray is blocked heads for min(+0x274, 4500) + 50.
+- The fire controller (0x10005300: +0x1f0 0 -> 0x10005a87, else 0x10005570): at +0x1ba's tick, k = rand(+0x1b2)
+  (0x10089e69: a 127-entry table of the C library's rand()), +0x1ba = now + k x 11; it pulls the trigger (control
+  +0x26, or +0x28 with +0x1be) when the selected weapon is in range and ready (0x10005ef1), k = 0, the heading error
+  (halved for classes 1 / 9) within the window and the pitch within 10 (5 / 10 for 0x10005570), and the aim ray
+  finds the target (0x10004d60). 0x10005a87's window (0x1000536e): atan2(target's +0x53c, distance) held to 3 .. 10
+  (10 within 100), x 1.2 for a gear's hand weapon (+0x5fb, the kind 10 one), else x 1.5 for a guided one;
+  0x10005570's is 1 and it leads the target (0x100066ea: n = (int)(distance / (shot speed - the target's speed
+  toward it)), used when n is within the shot's life; the point = position + velocity x n). The heat limit
+  (0x10006473, the +0x1be selection: an AI weapon whose heat +0x44 would bring +0x4e8 to +0x1e0 isn't chosen; heat isn't modelled). Firing a guided weapon rolls the
+  lock (0x10006672): rand(100) < +0x1e4, or classes 5 / 8 always.
+- Shots leave along the vehicle's aim (RE_NOTES "Weapons and shots"): the AI's torso twist (control +4, 0x1000d61d
+  -> 0x1000f705: the error / 11520 held to 1/64, x 11520, / 1.5 for gears) and pitch (control +0, x 3840) aren't
+  modelled: the port's AI aims along its heading, pitched at the target.
+- Group leaders (0x107c8ee0 + group x 0x6c): the GPS leader (0x10042603); a destroyed leader (0x10059e9d) or none
+  (0x100429f6) gives way to 0x1000b9d3: the first member in the group's list (0x1000fe66: not flagged 6) that isn't
+  the old leader.
+- Version 1 vehicles' top speed (0x1004f86d's sums, 0x10050db8): speed points S, cap M over the records: kind 1 by
+  id 0..5 M + 3 / 12 / 9 / 10 / 8 / 8, S - 0 / 10 / 15 / 14 / 25 / 30 (others M + 3); kinds 0x1b..0x1f by id 0 / 1 /
+  2 S + 1 / 2 / 3, M + 2 / 3 / 6, per option int (+0x14 .. +0x60) 2, 7, 0xc, 0x11 S + 1 M + 1; 4, 9, 0xe, 0x13 S + 1
+  M + 2; 5, 0xa, 0xf, 0x14 S + 2 M + 1; 0x1a, 0x1b S - 1 M - 1; kind 0x20 S + (int)sqrt(+0x64, or +0xc if 0).
+  Points = S held to 1 .. M, + (int)(points x 0.2 / 0.15 / 0.1) for header +0x38 bits 0x10 / 8 / 4; x 47.1744.
+  E.g. infantry 5 (235.9), the Antelope / Orca / Redjacket 12 (566.1), the Aller / Hun 10, landships 1.
+- The internal multiplier (0x1004e4cc) is for the vehicles whose group (+8) is the player's.
+
+## HUD: windows, radio menus, message bar (traced: HGSIM 0x1007629f, 0x10075dd0, 0x10020d48, 0x100636da, 0x10062baa, 0x10069f10)
+
+- Window rectangles at 640 x 480 (0x1007629f then 0x10075dd0: frac = (v << 16) / 319 (x) or / 199 (y), pixel =
+  frac x 639 (or 479) >> 16, rounded by bit 15): window 13 (DISPLAY_OBJECTIVES) is (20, 241) - (521, 479), window 15
+  (244, 31) - (517, 166), window 0 (44, 22) - (198, 166), window 14 (244, 0) - (517, 233), window 20 (10, 445) -
+  (168, 479), window 24 (26, 0) - (232, 221).
+- Hot spots (0x1010c160) are 16.16 fractions of the window's size (0x10076149: frac x (x1 - x0) >> 16, rounded);
+  0x10020d48 copies them to 0x107f1d60 and the window object keeps them as its text position (+0xf0, 0x1001e5c5).
+  Window 13's is (0, 0): DISPLAY_OBJECTIVES' text starts at the window's corner.
+- The message box's text position is its own (0x10040bd1: +0xb4 / +0xb8 = 0xa3d / 0xccd of window 14 = (11, 12));
+  0x100b26e6 draws the current objective there whether a menu is open or not (0x1014cb0c only slides HNMSGBX1).
+- Underline (0x10076a77): a line one font height below the text's y, from x to x - 1 + the glyphs' widths.
+- Radar clip (the radar mode record's +0x80 = 0x1011eff8[4] = 0x10077c95, set by 0x100875c0): window-relative
+  dx = x - ((w + 1) >> 1), dy = (int)((y - ((h + 1) >> 1)) / camera aspect (1.0)); drawn while dx^2 + dy^2 <=
+  ((w + 1) / 2 - 1)^2 (w = 154: 76). The view lines (0x10088be7 -> +0x88 = 0x10077e2f -> 0x10077fc6) end on radius
+  (w + 1) / 2 - 2 = 75.
+- Nav label (0x10054ae9, in view): the marker (0x1005675d) at the projection (x, y); the text at ((int)(x + 20),
+  (int)(y - 45)) (0x101011fc = 20.0, 0x10101200 = 45.0), "Way Point:" line in 0x1c, the range line a font height
+  down in 0x0f; the box (0x0c) from (tx - 2, ty - 2), width max(text widths) + 2, height 2 x font height + 2, and a
+  line from its bottom-left to ((int)x, (int)y - 10). When the nav's projection is within 30 pixels both ways of
+  0x1014cab0 / 0x1014cab4 (the target's projection, written by window 12's draw 0x100acc00), the label goes to
+  window 20 like an out-of-view one: lines at (0, 0) and (0, 15), both 0x0f.
+- Radio menus (0x100636da, layout 0x10062baa; records 0x1011cbe0[14]: 1, 2, 7..10 the squad mates' channels, 3 the
+  mission channel, 5 the escape screen ESCAPSCR, 6 another): record +0 window rect (window 15 for the channels), +4
+  flags (0xa: 8 = the exit item stays in place, 4 = a border instead of the title's underline, 0x20 = fill 0xf0,
+  0x10 = the background rect moved with the window), +0x10 / +0x14 a background shape, +0x18 its rect, +0x20 the
+  selection marker, +0x44 / +0x48 the font (DAT_107ca7e0), +0x4c colour, +0x50 the selected item's colour, +0x54
+  rows, +0x60.. 16.16 positions: title (+0x60, +0x64), marker (+0x68, +0x6c), number column (+0x70, +0x74), the
+  handler's column (+0x78, +0x7c), +0x80 the item list {state, title, ?, count, selected, ...; items of 5 dwords:
+  type, text, handler, its record, action}. 0x10062baa: a row = 0x10000 / (rows + 2) of the window's height; the
+  title's y half a row, the columns' y two rows. The channel menus: flags 0xa, colours 0x0f / 0x0f, 8 rows, every x
+  0.05: in window 15 the title at (258, 38), rows 13 high from y 58. Items: the number (itoa) unless a spacer (type 3);
+  the exit item (type 2 / 6) is 0 and restarts the count; the text at the number column + 2 x width('0') +
+  width('.'); 27 characters or more (0x1011cbd8 = 25 / 27 by resolution) break at 28 if a space there, else after
+  the last space in the first 29, the rest at (int)(y + font height / 1.5); then the handler (0x10064a52) draws its
+  value string at the handler's column. The mission channel's items: 5, 3, 5, 3, 5, 3 (three entries, each with a
+  spacer row); a squad channel's: six entries and the exit item.
+- Message bar (0x10069f10 / 0x1006a0ec / 0x1006a27f): two slots (0x1011cf18, 0x3c bytes: text, x / y position,
+  active, priority, end tick, font name, "HMESSBAR", rect). The rect (0, 0) - (1, 1) of the screen is scaled about
+  its centre to HMESSBAR's size (frame +0: height - 1, width - 1 = 19 / 639) and moved to the left edge, slot 0 to
+  the top ((0, 0) - (637, 18)), slot 1 to the bottom; the text at (0x28f of the width = 6, (height + 1 - font
+  height) / 2) in colour 0xfe over the bar. 0x1006a0ec(text, font, ticks, priority) takes a free slot, else the
+  lowest-priority one at or below the new priority; "Exiting Mission Area..." 0x1536 ticks at priority 100.
+- Objective announcements (0x10067cfc): the "<text> <completed / failed>" string is built and only has its spaces
+  squeezed (0x10066980); it isn't shown - only the voice plays.
+
+## Vehicle models (GDF skeletons) - corrections
+
+- The part's `+0x10` in the file is not used: the GDF loader (0x1004c830 -> 0x1004c8c4) overwrites every part's `+0x10`
+  with 0x1003cd60(`+8`), the segment type's zone: 1 / 2 / 0x42 -> 2; 3 -> 1; 5..8 / 0x5e -> 4; 0xd..0x10 -> 3;
+  0x16..0x18 / 0x3d / 0x3e / 0x4c / 0x4d -> 6; 0x1b..0x1d / 0x3f / 0x40 / 0x4e / 0x4f -> 5; 0x20 -> 7; 0x21 -> 14,
+  0x22 -> 16, 0x23 -> 13, 0x24 -> 15, 0x26 -> 11, 0x27 -> 9, 0x29 -> 12, 0x2a -> 10, 0x2c -> 8; everything else 0
+  (forearms, hands, feet, 0x43 roots ...). The object keeps it at `+0x26` (0x10003d7e), and a hit takes the struck
+  object's `+0x26` as the zone (0x100191d7, 0x10018a9c -> 0x1005c1f8). Zone 0 stops the shot and does no harm
+  (0x1005c1f8 takes zones 1..0x11 only; zones 5 / 6 only on classes 1 / 9).
+- A destroyed zone takes its part away with everything under it (0x100964e4 / 0x10096474: the node whose object's
+  `+0x26` is the zone, its children with it).
+- A guided shot's strike (0x8000, within 100 of its target) takes the vehicle model's `+0x8c` object, the root part's,
+  and its zone (2 for the gears' hips and the vehicles' 0x42 bodies; 0 for the 0x43-rooted ones: no harm).
+
+## Weapon mounts (0x1004f86d, 0x1004e6a0)
+
+- Both versions find a weapon's mount by name (0x1004dfa3 on the model) into the vehicle's ten mount slots (+0x498):
+  version 2 by the record kind 8..16 ("POF_AWLA" table), version 1 by the record kind's zone: 0x21 pof_twlu,
+  0x22 pof_twll, 0x23 pof_twru, 0x24 pof_twrl, 0x26 pof_awla, 0x27 pof_awra, 0x29 pof_hwlh, 0x2a pof_hwrh,
+  0x2c pof_ewen (strings 0x101182e8..0x10118348). A missing one is reported ("the POF seg %s is missing") and the
+  slot has no mount.
+- A weapon fires from its mount object's world place (0x1009518b) on the posed skeleton; the arm pose that raises a
+  hand weapon is the animation's (not traced).
+
+## Beams (0x100baf31, 0x10018a9c)
+
+- A beam takes one of 0x14 slots (0x107b7ce0, 0x156 bytes): `+0x48` live, `+0x34` life = the weapon's `+0x5c` less
+  the weapon slot's `+0x10`, `+0x3c` the mount object, `+0x8e` the type, `+0x70` power (+ the slot's bonus, + 2 with
+  the vehicle's 0xbd3 bit 0x400).
+- Once a frame (the shots' update, 0x10018xxx loop) each live beam: age += the frame's ticks, life -= them; life
+  below 1 ends it. Kinds 4 and 6 (rail guns, particle accelerators; kind = the table's `+0x10`) end after this test,
+  kind 2 (lasers) last their life. The ray: from the mount object's place now, along the vehicle's aim now
+  (0x100bcf44); the scene test (0x100229d9) - a struck vehicle part within the weapon's `+0x50` takes the damage on
+  its zone every frame (0x1005c1f8), counts in the statistics, shows the effect (0x1001b3a1, vehicles only);
+  structures (object flag 0x200) take its power (0x1001cc6c).
+
+## Radio queue priorities (0x10016aa0, 0x10016080, 0x10007abc)
+
+- The priority / limit table 0x107f9780 (8 bytes by sound id) is filled for 0x2c ids from 0x10108d08 (id, priority,
+  limit), the rest -1. Sound ids are the name registry's slots (0x10835204, 0x14 bytes, reference-counted), handed out
+  in the order names are first used: which names the 0x2c entries reach depends on the run.
+- A message duplicating a waiting one (same names) is dropped when its limit is -1, else once `limit` such are
+  waiting.
+
+## Shots in flight: their models (traced: 0x100c1152 HGBT branch, 0x100bb425, 0x100bd1e7, 0x1001aec9, 0x100191d7)
+
+- Projectiles are scene objects. gearsht1 (in every mission's INCL tree) has one HGBT chunk per shot kind (the
+  weapon's `+0x10`, 0x38 .. 0x48): `+0` i16 the last OBJ index, `+2` i16 the kind, `+6..` the OBJ indices (a pool:
+  40 for 0x38 / 0x39, 20 for the others), the model's name 29 bytes from the chunk's end (wstracer, wsbtracr,
+  wssshell, wslshell, wsshotgn, wshgrnad, wsmrockt, wsmissle, wssmortr, wsmortar, wsgrnade, wslgrnad, wslrockt,
+  wshrockt, wslbazok, wsmbazok, wshbazok). The pool is the shot table 0x1078d0e0 (0x200 x 0x156; `+0` kind, `+0x3c`
+  the object). 0x100bb425 fires only if its kind has a free entry.
+- As fired (0x100bd1e7): the object is turned by 0x1009556a(-asin(dy) x 57.2958, atan2(dx, dz), 0, order 1), the
+  quaternion Z(0) * Y(yaw) * X(pitch), put at the mount, then (unless the weapon's `+8` has 0x40) moved ahead along
+  the aim by the model's radius (`+0x50`) x 2 (0x101037f4). After that only its position changes (0x100951d7); a
+  guided shot is turned each tick along its motion (0x1001aec9: order 0, Z(0) * X(pitch) * Y(yaw); yaw 0 for
+  weapons whose `+0x86` has 0x20 and 1).
+- Kinds 0x38 / 0x39 also make a glow (0x10084362: a particle of type 0xc, size by distance, hidden when the scene
+  test 0x100229d9 says the eye can't see it); missiles 0x3d / 0x3e / 0x42..0x45 a smoke trail (0x10082556, or
+  0x100805dc with `+0x86` & 0x40); 0x3f, 0x40, 0x41, 0x46..0x48 0x100805dc. These and the beams (0x100baf31: 15
+  particles per beam, 0x1007b956 kind 2, 0x1007a0a6 kind 4, 0x1007acf3 kind 6) belong to the particle engine
+  (0x10079c54, types at 0x1011e6f8 + n x 0x1e, meshes built each frame), not traced.
+- Shot handlers per tick (0x10019xxx loop): `+0x30` counts up, `+0x34` (life left: the weapon's `+0x5c` less the
+  slot's `+0x10`) counts down; `+0x4c` (the weapon's `+0x76`) 0 -> 0x10019f1d, 3 -> 0x100191d7. In 0x100191d7 a shot
+  striking an object (scene test) by its flags: 0x100 a vehicle (the hit); 0x800 (ground tiles) flag 0x400, x / z
+  speed halved (2.0, 0x100eb484), y reversed and halved, the spray 0x1008514d(.., 2, ..); 0x400 flag 0x200; 0x200 or
+  none: x / z reversed. It ends (0x1001b224, the impact) only when its life is out or a vehicle was struck - such
+  shots bounce.
+
+## The scene test (0x100229d9)
+
+- For a segment longer than 0x100eb4f8 (0): every scene object and its children (the lists from 0x1028c960) except
+  the firer's own vehicle (flag 0x100 and `+0x24` = the firer; -1 tests all) and hidden objects (`+0` & 0x800),
+  each by its polygons (0x10022beb -> 0x10004813 / 0x10023199, child models through 0x100046de); the nearest hit
+  wins. Shorter: the ground alone (0x10022890).
+
+## Cover points (0x100275db, 0x100274d8, 0x10027234; the search 0x100279a3)
+
+- Built from the scene: objects whose flags (`+2`, the OBJ's `+0x34`) & 0xf0 are 0xd0 (kind 1) or 0xe0 (kind 2), at
+  most 200, 0x44 bytes each (0x107ee7e4, count 0x107ee7e0): `+0` kind, `+4..` the object's position, `+0x10` taken,
+  `+0x14` by whom, `+0x18` the object, `+0x20..` the point: the position plus the mean of the model's points as
+  stored (x 1.0, 0x100eb544).
+- The search: the free points (`+0x10` = 0) within the given distance, sorted nearest first (qsort 0x100dc1d0, by
+  0x1002795f).
+- The squad order "get to cover" (0xf, 0x1000f0f4): searches within 30000 of the mate; none -> refused (0x1000,
+  reply code 0xb); else the target is the vehicle the mate is already engaging (states 2 / 3 with a 0x200 target),
+  or the player's current target if hostile, or the nearest hostile vehicle (0x1000d1ca's distance, `+0xd4`);
+  reply code 9.
+
+## The cockpit eye (0x100c4b81)
+
+- The eye is the skeleton's "eye_hdhd" part (0x1004dfa3 searches the part tree by name), kept at the vehicle's
+  `+0x48`; the standing height `+0x53c` = -(the "sol_llft" sole's y) (0x100c4b7b), `+0x520` = root y - sole y. The
+  part rides the skeleton's animated pose, which isn't traced: the Hunter's measured 171.3 vs its part's 155.6 at rest.
+
+## Effects' vertex alpha
+
+- DX5DRAW never sets render state 0x15 (the texture blend), so Direct3D 5's default MODULATE applies: alpha from
+  the texture when it has one. Every texture is a 4444 surface (0x10005690), so the sequence polygons' vertex alpha
+  200 (0x1008700c) changes nothing; the texel's alpha blends (render mode 8).
+
+## The AI: combat state machine (traced: HGSIM 0x1000a811, 0x1000cb8f, 0x100a58c0 and its states, 0x10089e69) - src/units.c
+
+- No AI files: the GPS record's AI name (`+0x25`, "mmb00std" ...) is copied by the loader (0x100c40a8, into a local)
+  and never read again; the one "mmb00std" string in HGSIM is the network default record's.
+- The AI runs once a frame (0x1000a811: +0x198 against the clock). A vehicle's mode (+0x1a2) picks its function in
+  0x10107d90: 0 0x1000cb29 (stop), 3 0x1000cf4d (the combat AI, 0x100a58c0), the rest 0x1000cb8f: 2 attack (close
+  to 0x1000d1f1's radius of the point: a vehicle 100, a waypoint its +0x10 - 3000 for 0x100af430's -, at least 100;
+  fire), 4, 5 formation (0x10010aa3), 6 .. 8, 0xd flank, 0xe scout (no firing), 0xf cover. 0x1000e7c9 (vehicle,
+  mode, point) switches modes (entry work in 0x1000d9de: 0xd makes the flank waypoint beside the target, square to
+  the player -> target line, at the player's distance, either side; throttle full). Orders (0x1000f2b0): attack 2,
+  defend 7, flank 0xd, scout 0xe, cover 0xf (0x1000f0f4), formation 5. 0x1000adb8 (the engage test, unless +0x1aa
+  bit 0) puts a vehicle and its group in mode 2 on what it found. The rule lists that switch modes otherwise (+0x16c
+  from +0x170 .. +0x178 by 0x1000ab37; conditions 0x10107dd0, actions 0x10107df0) aren't traced.
+- The random numbers (0x10089e69): 127 values made by SimMain (0x10089da0) with srand(0) and the C library's rand
+  (0x100de850 / 0x100de860: x = x * 0x343fd + 0x269ec3, (x >> 16) & 0x7fff: 38, 7719, 21238, 2437 ...), taken in
+  turn by one cursor shared by every caller (0x1014b674, wrapping at 0x7f), modulo n. 0x10089ea9 takes from a
+  second table the same way.
+- The combat AI (0x100a58c0; reset by 0x100a6212: state +0x1f4 -1, last +0x1f6 -1, forced +0x1f8 -1, range +0x274
+  15000 if 0, the state table +0x278 = 0x10123c48 + class x 8, 0x10123ca0 when +0x538 is 1). A state ends when its
+  function says so, its end tick (+0x1fc) comes, or a state is forced; ending (0x100a7203 -> 0x100a7171) keeps it as
+  the last. Gears, outside states 0, 0x10, 0x11, 0x18 .. 0x1b, are interrupted when rand(0x61) < 3: forced
+  0x10123cf0[rand(0x40) >> 4] = 24, 26, 25, 27.
+- Choosing (0x100a6956): a forced state (0x100a6603); gears (0x100a66b4): no target or an aircraft 0; within 1000:
+  rand(0x13) == 3 gives 0x15, then with jump jets (+0x514 = 10) rand((20 - 10) x 2) == 0 gives 0x14; others
+  (0x100a67f6): no target 0, an aircraft target (not being one) 2; else the table (0x100a6888): with no last state a
+  random one of the first count - m rows, else a random one of the last state's row's next states. 0x100a64bd
+  switches gears to 0x10123ca8's table (states 14, 16, 17, 22, 23: cover) when a cover point is within 28000
+  (0x100ac564 -> 0x100279a3) - not done.
+- Tables (0x12-byte rows: state, n, next[7]): gears and class 5 (0x10123998, count 13, m 8): 1 {19 1 2 3 4}, 2 {7 8 4
+  19 19}, 3 {7 8 19 19}, 4 {8 7 8 19}, 19 {3 2 8 4 1 3 8}, 0 {0 1 2 3 4 4 19}, 24 {7 8}, 25 {19 2 7}, 7 {20 1 8}, 8
+  {19 1 2 3 4}, 27 {19 8 7}, 10 {7 7 4}, 26 {3 1}; classes 2 / 8 (0x10123b28, 3, 2): 2 {7 13}, 7 {13 2 13}, 13 {13 2
+  13}; class 4 (0x10123aa0, 6, 2): 0 {2 19 3 8}, 2 {2 19 0 3}, 3 {2 0 19}, 19 {2 0 8}, 8 {2 19 3}, 10 {19}; class 9
+  (0x10123b60, 13, 7): 0 {0 1 2 3 4 4 4}, 1 {0 1 2 3 4 4}, 2 {7 8 4 4}, 3 {7 8 4 4}, 4 {5 5 8}, 19 {3 2 8 4 1 3 8}, 5
+  {7 8}, 6 {6}, 7 {0 1 2 8 4}, 8 {0 1 2 3 4 4}, 9 {0 8 7}, 10 {7 7 4 4}, 11 {3}; the others (0x10123a88): 0 only.
+- Starting (0x100a6a5e; the end tick 0x235a on unless set): 0 (rand(5) + 8) x 0xb5; 1 0xe24; 3 a side +-1; 4 0x1c48;
+  7 a waypoint 10000 out at 0x10123860's direction 3 / 15 (4000 or more from the target) or 4 / 12, turned with the
+  vehicle; 8 (rand(11) + 10) x 0xb5 backwards (+0x59); 10 0x5a8 backwards (0x2d4 when repeated, class 8 forward);
+  19 0x2a6c; 20 0xe24; 21 0x389; 24 / 25 0x2d4; 26 0x43e; 27 (rand(4) + 1) x 0x5a.
+- States: 0 attack (0x100a7e40, closer than min(range, 4500) forces 10); 1 (0x100a7897 / 0x100a7f95) a waypoint
+  15000 from the target at 0x10123860's slot x 2 (slot by the side it is on, 0x100ab4d7), renewed every 0x21f, to
+  3000 then turning to face; 2 (0x100a8135) toward the target to 5500, over within max(closing / 7.7, 1) x 8000; 3
+  the same swerving 450 / 1024 of the turn, the side flipped every 0x21f; 4 (0x100a9434) with jump jets: to 5000 at
+  full, a jump (+0x1e), 0x5a8; 7 (0x100a82ed) to the waypoint at 3000, over there; 8 / 10 (0x100a8294 / 0x100a8791)
+  facing the target backwards at full; 19 (0x100a9a46) a waypoint 8000 from the target square to the line between
+  them, either side, at 2000, again on arrival; 20 (0x100a9636) within 1000 with jump jets: backwards 0x2d4, a jump,
+  0x5a8; 21 (0x100a9869) backwards at 1/4 for 0xb5 then at full (+0x56); 24 stands (0x100a7ba8); 25 turns in place
+  (0x100a7bf3); 26 (0x100a7c41) stands facing, over within 5000 or off by more than 1 degree; 27 stands (0x100ac0bb).
+  Every state fires through 0x10005300 at the target's bearing error (0x1000e3ff).
+- The obstacle probe (0x100aa2ac: four scene rays ahead, a swerve), jumps, the torso (0x100ac0bb, 0x1000d61d /
+  0x1000f705) and heat aren't done.
+- +0x208 (0x100ac127's list, read by the engage test 0x100ac1e0): 0x100b05db adds a vehicle of another side that
+  points at this one (+0xec), three at most.
+- Jump jets: the torso record's option bit 12 (0x1003d3e9; +500 weight) gives the gear block +0x510 = 0x2d4 and
+  +0x514 = 10 (0x1004e6a0 / 0x1004f86d).
+
+## The particle engine (traced: HGSIM 0x10079c54, 0x10079dfa, 0x10079eee, 0x10078c29, 0x100790be, 0x10078e34) - src/particles.c
+
+- Systems (0x1007953c, from a pool of scene objects made at load, 0x10079356: at most 1000) carry eight nodes
+  (+0x12 + n x 0x32: an offset from the system's object, +0x30 the node's frame, +0x38 its size), an update
+  (+0x336) run once a frame while the frame's ticks (0x10130770) aren't 0 (0x10079dfa, SimMain after the shots and
+  the splash) and a draw (+0x33a) run as the object is drawn (polygon type 0x8000 -> 0x10079eee). +0x33e the clock at
+  the spawn (0x10130768, ticks), +0x402 the type, +0x3fa the system's frame, +0x3fe (0x101316dc / the distance at
+  the spawn) / 4 (0x101316dc = the player gear's +0x53c x 5 x 4: the outside view's distance).
+- Types: 22 records at 0x1011e700, stride 0x1e: +0 texture slot, +4 frame count, +8 / +9 / +0xa red / green / blue,
+  +0xc intensity, +0xd size, +0xe name, +0x12 lock, +0x16 order, +0x1a loop. Names: railgun, haywire, accel, laser,
+  shockwave, skate, gun, smoke, grenade, mortar, missile, chunket, tracer, spark, missilespark, laserspark,
+  pweaponspark, projpuff, laserpuff, pweaponpuff, missilepuff, footstep. Defaults: colours and intensity 0xff, size 8
+  (1 for accel and laser). The 3D renderers read the game folder's PartSpec.ini (0x10078e34: [name] Red, Green, Blue,
+  Intensity, Size, Lock, Order, Loop, Texture00..31, case-insensitive) and give each type with textures the next free
+  texture slot from 0x100 (0x100790be); in software every type is untextured, colour 15, size 1. "accel" has no
+  section (the file's is [ParticleAccelerator]), "railgun", "haywire" and "mortar" none either.
+- Frames (the draws, e.g. 0x10083e8a): order 1 starts the system at frame 0, 2 at a random one, else -1 (a random
+  frame per node every draw); every node drawn steps the system's frame on by one (so frame 0 is never shown with
+  order 1); past the count loop 1 wraps, 2 holds the last, else the system ends. A Lock type's nodes keep their first
+  frames (0x10079eee sets +0x10 bit 4 after the first draw).
+- Sizes (the 3D renderers): base x the type's size x 0x1011e9d0[rand(24)] (1.0, one in 24 2.0), at least 1; in the
+  outside view (0x1014b58c: the view 0x101316ec is 1) x +0x3fe, else x the zoom (the eyepoint's +0x18, 1);
+  truncated; below 1 the type's size / 2. Each node is a screen square of that size (0x10078c29: half each way;
+  corners' texture coordinates from 0x1011e998 at a random start of four), depth-sorted. In software a node is a
+  pixel (the tracer, 0x100ca6c4) or a size-1 square of the node's palette colour.
+- Spawns test the point first: within the eyepoint's far distance (+0x40), on the screen (0x100b87f9) and nothing
+  between it and the eye (0x100229d9); else no system.
+- Shells, after their move each frame (0x10019f1d; 0x100191d7 for the bouncing ones), with the frame's motion d from
+  their last place: kinds 0x38 / 0x39 the tracer glow (0x10084362: type 12, nodes at (k + 2) / 8 d, drift d / 8 a
+  frame, 0x17 ticks, colour 0x1f); 0x3d, 0x3e, 0x42..0x44 (and 0x45 for bouncing shells) the smoke trail when the
+  weapon's +0x86 has 0x40, else the missile trail; 0x3f both; 0x40, 0x41 (and 0x46..0x48 for the others) smoke; 0x45
+  the missile trail. Missile trail (0x10082556): type 10, nodes (k + 2) / 8 d off by rand(10) - 5, rand(50) - 25,
+  rand(10) - 5, drift d / 8 and rand(10) up a frame, 0x6e ticks, colour 0x1f - (age / 110 x 15) / 2. Smoke
+  (0x100805dc): type 8, nodes (k + 2) / 16 d off by rand(50) - 25 and wandering rand(60) - 30 a frame, drift d / 256
+  and rand(10) up, 0x16a ticks, colour 0xfe - age / 362 x 15 (0xf0 at 15).
+- Ground spray (0x1008514d, the 3D renderers only): a bouncing shell glancing off an object flagged 0x800; type by the
+  weapon type (0xf..0x1b missilepuff, 0x25 / 0x2d pweaponpuff, 0x21..0x23 / 0x28 laserpuff, else projpuff); the system
+  drifts -vx / 5, -10 (+ rand(10)), -vz / 5 a frame; nodes start within 5 and move by their own rand(40) - 20 off
+  that each draw; 0x5a ticks; base size (15 - i) / 4 x 2000 / the node's depth, i = age / 90 x 3.
+- Beams (0x100baf31 at the firing; 0x10018a9c keeps the beam's 16 points +0x92, mount to end in 15 steps, every
+  frame while it lasts): kind 6 (accelerators) 15 segments (0x1007acf3, type 2 accel, colour 0x1f) living k x 0x16
+  ticks; kind 4 (rail guns) every second point (0x1007a0a6, k x 0x16 ticks), drawing nothing (0x1007a092) and ending
+  with effect 0x49 there (0x10079f7d); others (lasers) 15 segments (0x1007b956, type 3, colour 7, the beam's life,
+  AFXWLLLC looped while they last). A segment's draw (0x1007a379 / 0x1007afdc): from its point to the next on the
+  screen a band 5 pixels across (across x when it runs more along y, else across y; both on the diagonal, 0x10086810)
+  in texture slot 0x100 + (colour >> 1), then a 1-pixel band (2 to 3) in 0x100 + colour - or both in the type's slot
+  when it has textures (polygon type 0x7000: 0x1008bd80 -> 0x100012c5). So a laser is two bands of fxred_00; an
+  accelerator's are slot 0x10f's (with patch 1.2's file: pweaponpuff, fxdust00) and slot 0x11f's (none: not drawn);
+  in software the slots are empty and no beam is drawn.
+
+## Shells: pools, the start, bouncing (traced: 0x100bb425, 0x100bd1e7, 0x10018975, 0x100191d7, 0x10019f1d)
+
+- A shell needs a free entry of the shot table whose kind is its weapon's +0x10 and that has an object (gearsht1's
+  HGBT pools: 40 tracers, 20 the others); else it isn't fired (no sound), its round spent all the same. Its object is
+  placed at the mount and moved twice its model's radius (the mesh's +0x50) along the aim unless the weapon's +8 has
+  0x40 (no weapon has); kinds 0x3e / 0x3f also get a sideways offset of rand(200) - 100 (not done).
+- 0x10018975 runs 0x10019f1d for the weapons whose +0x76 is 0, 0x100191d7 for 3 (the hand grenades: types 0x1c,
+  0x26, 0x27, kind 0x3d). 0x10019f1d: a struck object flagged 0x100 is a vehicle; 0x200 a structure (0x1001cc6c, the
+  shell flagged 0x200); 0x400 flags the shell 0x200; any other flags it 0x400 (the ground's effect): every placed
+  object as the ground. At its life's end the shell goes without an effect (0x1001b224 with 0).
+- 0x100191d7 (bouncing): a vehicle struck takes the hit and ends it; an object flagged 0x800 (the ground's tiles,
+  some rocks) halves x and z speed, turns y back halved, flags the shell 0x400 and sprays (0x1008514d); 0x400 flags it
+  0x200; 0x200 or none turns x and z back. It moves on while above the ground. At its life's end it strikes where it
+  is with its effect (0x1001b224 with 1), by the flags it gathered.
+
+## Skeletal animation (traced: HGSIM 0x10012dc5, 0x1001386b, 0x1001325d, 0x100147b7, 0x1004e3db) - src/anim.c
+
+- 3DI: i32 1, i32 length in frames, i32, i32 track count; tracks from +0x10: name[0x20], i32 position keys (0x10:
+  i32 frame, x, y, z), i32 rotation keys (0x14: i32 frame, quaternion x, y, z, w); then the control track (i32
+  count, 0x39-byte events: sound, stance, 0x10013735). Names shorter than 8 become "++++SKIP".
+- A track binds to the vehicle's first object, depth first (self, child, sibling: 0x1009623a / 0x1009629f), whose
+  name's characters 4..7 equal the track's (case-sensitive int compare). Objects are named by their drawn model in
+  upper case (GD12RASH, W031HWRF, POF_HWRH, EYE_HDHD, DMN1TRHP: read from the running original).
+- Posing (0x1001386b): each track's rotation at the frame (0x1001325d: the key on it, else between keys, 0x1005267f)
+  sets the object's rotation (+0x3c, 0x10095620); TRHP's is multiplied after the object's own (0x100956b7), TRSO's,
+  RASH's and HDHD's before it (0x1009566e: the twist / aim / head turn kept there). Position keys aren't read here.
+  Gears and infantry are then stood on their lower sole (root y = vehicle +0x78 - lowest sole).
+- Sets (+0x5ff): 0 at first; version 2 gears (0x1004e6a0 -> 0x1004f1a6) each weapon of kinds 8..16 in slot order:
+  0x1004e3db (types 2..8, 0xd, 0xe, 0x21..0x25, 0x28: 0x100 rifle; 0x1d..0x20: 0x200 bazooka; else unchanged).
+  Version 1 (0x1004f86d -> 0x1005054d): "infa" in the GDF block's name (infantry): type 0 0x100, 0x29 0x200; else
+  0x1004e3db. Animation id = set + state, + 0x1000 for class 9 (0x1003f7b0), + 0x5000 / 0x4000 for the V13 / V63
+  aircraft; names 0x100147b7 (GNW/GRF/GBZ/DNW/DRF/DBZ + STAND, STEPL, ..., V13SPINN ...). State 0 = stand.
+- Checked: the Hunter in GRFSTAND, mission 1 under Wine, every right-arm object's place from its root within 0.1
+  (RAUP 128.6 111.1 -10.6 ... the rifle's POF_HWRH 125.7 98.3 344.4); tests/test_data.c checks it.
+
+## The cockpit eye (traced: 0x100c4b81 / 0x100c4c26, 0x100373fc)
+
+- The vehicle's +0x48 is the EYE_ object (the root if none); gear +0x524 = that object's local y less the root's
+  world y at load (0), the Hunter's 15.73 (EYE_HDHD's link from GD11HDHD). The camera (0x100373fc) is the eye
+  object's world transform of (0, +0x524, 0): eye 155.6 + 15.73 = 171.3 above the root for the Hunter, as measured.
+
+## HUD: the nav label near the target (0x10054ae9, 0x100acc00, 0x10021519)
+
+- The windows draw (their +0x13c) before the nav marker (0x100538b0 -> 0x10054ae9). Window 12's draw stores the
+  target's projection (in view or not) in 0x1014cab0 / 4 whenever it has a target; without one they keep the last
+  (0 at first). The nav's label goes to window 20 when abs(ftol(nav x - 0x1014cab0)) <= 30 and the same for y.
+
+## The sound name registry (0x10007abc, 0x10016080, 0x10016aa0)
+
+- Ids from 1, a name's the first time it is used (every sound play wrapper and the radio queue register), never freed
+  (no use counts down); reset at the sound's start (0x10015950 -> 0x10007a70). In the running mission 1 after 40 s:
+  AFXHGWKL 1, AFXHGENG 2, AvoM011S 3, (an empty name) 4, AFXLMG_F 5, AFXWISTB 6, AFXWIBUG 7, AFXBLDED 8, AFXEXPFI 9.
+- 0x10016080: the table 0x107f9780 (8 bytes by id: priority, limit, +4) all -1 but 0x2c entries from 0x10108d08
+  (id, priority, limit, +4): e.g. id 1 80 -1, 11 80 1, 154 -1 -1, 201 10 1, 148 100 4. The radio queue (0x10016aa0,
+  every caller's priority -1: the table's) places a message before the first waiting one of lower priority; a pair
+  matching a waiting one is dropped when the limit is -1, else once that many match.
+
+## The AI's modes and rules (traced: HGSIM 0x1000a811 .. 0x10010412) - src/units.c, src/ai_rules.h
+
+- There are no AI files: the behaviour is the rule sets compiled into HGSIM. 0x1000ed62 fills the table 0x10834e80
+  (entry 0 none) with the 12 sets at 0x101072d8 (tools/ref/gen_ai_rules.py dumps them to src/ai_rules.h). A set:
+  i16 count, a pointer to (i16 mode, i16 rule count) pairs, a pointer to the rules, 12 bytes each: i16 condition,
+  i16 a1, i16 a2, u8 action, i16 the mode to set, i16 its argument.
+- A vehicle (record `+0x16c` active rules, `+0x170` / `+0x174` / `+0x178` three slots) gets set 1 in slot 0 at load
+  (0x1000a223 -> 0x1000fc1a(v, 0, 0, leader)) and the objective's set in slot 2 (0x1000f7d8 / 0x10010412:
+  0x1000fc1a(v, 2, lowest bit of the objective type + 1, leader)). 0x1000fc1a picks from the class's selector
+  (classes 1 / 9 0x10107c10, 2 0x10107cd0, 3 0x10107c50, 4 / 10 0x10107d10, 5 / 8 0x10107d50, 6 0x10107c90; 16 i16
+  pairs, the first for the group's leader). Every selector reads: 0 -> set 1; type bits 1, 2 -> 8 / 3; 4 -> 7 / 2;
+  8, 0x20, 0x100 -> 10 / 5 (aircraft 12 / 5 for 0x100); 0x2000 -> 9 / 4; 0x4000 -> 11 / 6; others 1.
+- 0x1000ab37 builds the mode's list: slot 2's, 1's, 0's rules for the current mode (+0x1a2), each (condition, a1)
+  once. 0x1000e750: a mode none of the slots' sets list can't be set.
+- 0x1000a811, each tick (guarded by the sim clock 0x10130768 at `+0x198`), for a vehicle the sim drives (+0x14 2) out
+  of mode 0xc: the group's leader runs 0x10010412; then 0x1000a988: 0x1000adb8 (fighting back), then the rules in
+  order. Arguments through 0x1000d171 (0x40 the target +0x1a6, 0x2a the point +0x1a4, 0x25 the code the condition
+  found). Conditions (0x10107dd0): 1 0x1000c427 the nearest target not destroyed and seen within a2 x 100 (-3
+  any); 2 0x1000c502 the farthest beyond a2 (-3 0, -4 +0x1ce, -2 +0x1ca, 0 its radius); 3 0x1000c1ee within its
+  radius (a2 0; in mode 7 a reached waypoint moves on to the next and gives 0) else as 1; 4 a1; 5 never; 6
+  0x1000cace the target destroyed (a player's-group vehicle speaks reply 4); 7 0x1000c9d8 (unless +0x1aa & 3) the
+  nearest seen within a2 (-2 +0x1ca, -1 +0x1c6) by 0x1000c764. Actions (0x10107df0): 0 go on; 1 clear the stack; 2
+  push (mode, target) into the stack's one place (0x1000cfcc); 3 pop it and set that mode, going on to the next rule
+  (going on with the rule only when nothing was pushed); 4 0x1000eda7: the leader's +0x19c / +0x19e = (condition,
+  code), not taken. A taken rule sets its mode (0x1000e7c9) and ends the tick's AI; no rule taken runs the mode's
+  function (0x10107d90: 0 / 0xc 0x1000cb29, 3 0x1000cf4d, others 0x1000cb8f).
+- 0x1000e7c9 (mode, arg, push): push 0 clears the stack, else 0x1000cfcc; 0x1000d70f ends the old mode; mode 5 on
+  0x2201 (the leader) asked of the leader is mode 0; 0x1000bc02 resolves special codes (& 0xf000) to the nearest seen
+  (0x1000c764 with -3); +0x1a4 = +0x1a6 = it; 0x1000d9de starts the new mode (2: the fire decision `+0x1ba` = now +
+  rand x 0x16; 3: throttle 0; 4 / 0xb: +0x1aa = 1; 5: the formation slot as a waypoint, 0x1000ebfc / 0x100428c2; 7:
+  four waypoints about the target, 0x1000e963 - a vehicle's both standing heights + 3000, at least +0x1ce, a
+  structure +0x1ce, a nav its radius; 0xd: the flank point; 10 / 0xb: +0x18 | 0x10 and the engine state +0x4f0 | 3,
+  powered down, the flag starting the engine again when the mode is left); then 0x1000ab37. 0x1000e6f5 sets a mode
+  only when nothing is pushed.
+- Codes (0x1000e1a8): 0x200 | vehicle, 0x100 | nav (waypoints 0x100af430 are navs of radius 3000), 0x400 |
+  structure; 0x2100 the group's reach (0x20) objective's nav (0x10069aac), 0x2101 the vehicle's waypoint +0x1d2,
+  0x2200 the player, 0x2201 the group's leader, 0x2202 itself, 0x4200 the player's group's vehicles, 0x4201 every
+  hostile vehicle (0x10042b80 and not side 2). Radii (0x1000d1f1): a nav's, a vehicle 100, a structure 10000, at
+  least 100. Seeing (0x1000d1ca -> 0x100b05db -> 0x100afe82 / 0x100afc5b / 0x100b0379): the sim's vehicles see any
+  standing target (the sensor limits are the player's alone), its distance at +0xd0; a vehicle or structure within
+  its height + 20000 is marked reached by the seer's group (+0x18 | 0x20, +0x1a | group bit); navs by the player only.
+  Done (0x1000e495, by objective type): 1 / 2 / 4 / 0x1000 destroyed (a nav never), 8 / 0x100 reached by the group.
+- 0x1000adb8: unless +0x1aa & 1, a hostile vehicle on this one in mode 3 (0x1000d0ba) that it isn't on: mode 2 on
+  it, pushed, and the same for its group's members (not the player) not in 2 / 3 on it.
+- The group (0x1000f7d8, at the start 0x1000a100 and whenever the group's current objective changes, 0x1006932f):
+  each member the sim drives takes the objective's set in slot 2; the wait 0x400 puts it in mode 10, 0x800 / 0x10 in
+  11, others in 5 on the leader (the leader in 0), +0x1aa = 0x40 | 0x1000fbf9(the objective's +0x31: 1 -> 2, 2 ->
+  1); a group the player leads does that only the first time (0x1012d4f8). The objective's +0x30 is its count
+  (runtime +0x79, 0x10066090).
+- 0x10010412 (the leader, each tick): its pending request first (0x1000ff32: 0 -> 0x1000f7d8 again, 7 -> 0x1000ff96:
+  on a defend objective every armed member with +0x1ae not in 2 / 3, else the first such member with +0x1aa & 3
+  clear and not the leader (by +0x1a8, always 0), else the leader: mode 2 on the code, pushed, +0x1aa | 0x20 &
+  ~0x40); then for a group the sim leads, an objective (not 0, not & 0xe10): the first target not done whose
+  members on it (by type and mode: 4 in 7; 1, 2, 0x4000 in 2 / 3; 8 in 2; 0x20 / 0x100 / 0x200 / 0x400 in 8; 0x2000
+  in 4; 0x1000 any) are fewer than the count (0: the group's size) goes to the first member in mode 0 or (armed) 5
+  that isn't the leader, else the leader in mode 0: slot 2's set, the mode by type (4 -> 7; 1 / 2 / 8 / 0x4000 ->
+  2; 0x20 / 0x100 / 0x200 / 0x400 -> 8; 0x2000 -> 4; 0x1000 -> 0) on the target, +0x1aa | the flag.
+- The modes' functions (0x1000cb8f): 2 0x1000d2bd / 0x1000d679 toward the target within its radius and the fire
+  controller (0x10005300); 4 drives away (+0xe4 + 180), at 1/128 for a gear; 5 / 6 / 7 / 8 0x10010aa3 (a gear's
+  torso weave, +4 of the control +-5 every 0x20 / 0x40 ticks) then toward the point; 5 the formation waypoint again
+  after; 0xd / 0xe toward the point; 0xf the cover point (0x10027732 / 0x100abd9d); 3 0x1000cf4d the combat state
+  machine; 0 / 0xc 0x1000cb29 (throttle 0, aircraft circling 0x10010e31 / 0x10010d9c); others the throttle 0.0125.
+- Set 1's rules (all vehicles): mode 0 / 5 / 10: an enemy within +0x1ca (+0x1c6 in 10) asks the leader; 2: the
+  target within 35000 -> 3 on it; destroyed -> pop or 5 on the leader; the waypoint beyond +0x1ce -> pop or 8; 3:
+  as 2, beyond 35000 -> 2; 4: the target beyond 50000 -> 0; 7: an enemy within +0x1ca -> push, 2 on it; the point
+  reached -> 8 on the target; 8: the target reached -> 5 on the leader; 0xd: the point reached -> 3 on the target;
+  0xe: the target reached -> 0 on the nearest enemy; 0xf: the point within 1000 -> 0 on the nearest enemy.
+- GPS `+0xa` / `+0xc` / `+0xe` (u16, vehicle +0x186 / +0x188 / +0x18a): 0 read as 250, x 100: +0x1ce (the leash),
+  +0x1c6, +0x1ca. Mission 1: 500 / 400 / 400.
+
+## The AI's weapon choice (traced: 0x100073b7, 0x100060a7, 0x10006473)
+
+- At each fire decision (0x10005a87 / 0x10005570) 0x100073b7 asks whether to choose again: the selected weapon out
+  of its band (0x1000502f: 3 nearer than +0x4c, 2 within the reach, 1 at it, 0 beyond), the target's kind
+  (0x10006b27: class 9) not the weapon's (0x10006cb4: types 0, 1, 9, 0xc for infantry), empty, or another weapon of
+  more power (+0x78) in its band (0x10007313).
+- 0x100060a7 (+0x1be 0): over the slots from the next (0x100bbcef: +8 & 4 weapons), each 0x10005ef1 passes (ready,
+  loaded, band 1 / 2): +1 the first, else +2 endless or more ammunition than the best's; +1 when +0x86 & 0x40 matches
+  the aim being blocked (0x10006af8); +1 when its infantry kind is the target's; power: +1 the first, +3 more than
+  the best's (not infantry), +5 less (infantry); +2 guided; a non-artillery weapon (0x10006d13: kinds 0x3d, 0x42,
+  0x43) +2 with artillery selected, +1 an aircraft target (0x10066eeb), +4 a structure (+0xec & 0x400). The best,
+  ties to the later, is selected; types 0x16 / 0x14 / 0x10 raise the control's +0 (their pitch).
+- 0x10006473 (+0x1be set): every weapon in its band, loaded and working is armed (+0xc) while the heat stays under
+  +0x1e0; the first guided ready one is selected (else 0x100bc0e4's fire group).
+
+## B20 and the situation markers (traced: HGSHELL FUN_10149529, FUN_10017c1d, FUN_100e97ee, FUN_10034d31)
+
+- B20: actions 6 / 7 (event 0x21) run FUN_10017c1d on the game list and the accept / delete buttons: with no selection
+  (FUN_10002110 = -1) the button's +0x48 disables it, otherwise +0x4c enables it.
+- Situation markers: each marker's SHP icon is drawn by FUN_1003167f -> 0x1017f858 at the point plus frame 0's x0 /
+  y0 (the hot spot at the point). The label's rect (FUN_10034d31, SHP case 0x10183ddb) uses frame 0's first dword:
+  x0 = x + 1 + (dword >> 16), right = x + (dword >> 16) + 2 + text width, bottom = y + (dword & 0xffff), top = bottom -
+  font height. The dword is the frame's canvas (width - 1, height - 1), not its drawn box.
+
+## The AI's cover states (traced: HGSIM 0x100a64bd, table 0x10123ca8, 0x100a8aa4, 0x100a8c28, 0x100a8dd6, 0x100a8f84, 0x100a9095, 0x100a9020, 0x100a6a5e / 0x100a7203's cover cases) - src/units.c
+
+- The table (0x100a64bd, at each choice): a gear (class 1, not dying: +0xbdb != 5) takes the cover table 0x10123ca8
+  while a free cover point lies within 28000 of it (0x100ac564 -> 0x100279a3: the points not taken, +0x10, nearer than
+  the range, nearest first), else its class's (0x10123c48 + class x 8). Switching to the cover table forgets the
+  current and the last state (+0x1f4 / +0x1f6 = -1); switching to the class's with no last state starts by the target
+  (+0x1a6): 0 not a vehicle, 2 an aircraft (0x10066eeb), else 1. The cover table: 10 rows, the first pick rand(1)
+  (state 14): 14 -> 17 16 16 17 17 16 16; 19 -> 14; 25 -> 19 22 14 23; 26 -> 19 23 22 14; 27 -> 19 14 23 22; 23 -> 16
+  22 14 23 17 23; 22 -> 17 22 14 16 17; 16 -> 22 23 23; 17 -> 22 23 22; 10 -> 14.
+- The state's words: +0x200 a timer, +0x214 its step, +0x218 a radius / shot count, +0x21c / +0x220 / +0x224 the walk's and
+  the peek's timers, +0x228 the outcome (1 got there, -1 failed), +0x22a the point reached, +0x236 the point in use.
+- 14 (0x100a8aa4; no end time): step 1 picks a point against the target within 28000 (0x100ab7f6; no points at all:
+  failed), step 2 walks there (0x100abd9d: 1 there -> 3, 2 the point another's -> 1), step 3 succeeded. It aims all
+  the while (0x1000d1ca, 0x1000e3ff, 0x10005300).
+- 22 / 23 (0x100a8c28 / 0x100a8dd6; the radius starts at 10000): step 1 widens the radius by 10000 and takes, of the
+  free points within it, the nearest to the target (22, 0x100aba26) or the farthest (23, 0x100abae4) (0x100abba2 ->
+  0x100ab93f; none: the nearest free point of all, 0x10027865); step 2 walks there (there: 3, else back to 1); 3
+  succeeded (+0x22a = +0x236).
+- 16 (0x100a8f84; 0x712 ticks; it takes the point at its start, 0x1002708f: +0x10 = 1, +0x14 = the vehicle):
+  crouched (0x100ac059: throttle 0, +0x54 = 1), turned to the target beyond 10 degrees (0x1000d679; 0x100a7b49 gives
+  a still vehicle 1/640 throttle to turn); over by 0x100a9020: a shot of another side within 50000 coming its way
+  (0x100abf2d: velocity . (vehicle - shot) > 0) forces 22 with the outcome 1, the vehicle engaged (0x100ac524) forces
+  23 with -1.
+- 17 (0x100a9095; 0x3fa2 ticks, the first hide after 0x5a8; takes the point): engaged (0x100ac524) - stand, face the
+  target, failed. Else step 0x11 (peek): standing, it turns to the target and, the aim ray blocked and within 10
+  degrees, straffes (0x100ac5dd: the control's +0x57 / +0x58, a side by rand(2), 0x16a ticks; the time out counts as
+  seen); seen: 0x21, firing, each shot counted (0x10005300's result); after 8 shots or its time: step 0x12 (hide,
+  0x43e ticks): back to the point (0x100abd9d), then crouched; its time out: peek again for 0x5a8.
+- The end (0x100a7203): 16 / 17 give the point up (0x100270bf) and stand (0x100ac08a); 17 stops its straffe
+  (0x100ac0bb(2)); an outcome -1 (or a forced end) forgets the state, the last state and the points.
+- 0x100ac524 (the vehicle engaged): the player of another side within 15000 whose view ray (0x1000510e: heading +
+  twist, its pitch) strikes this vehicle first, or strikes nothing while the player targets it; else (0x100ac1e0)
+  a vehicle of its +0x208 list (another side, its target this one) within 15000 whose aim ray finds it (0x10004d60).
+- Combat state 3 (0x100a58c0 case 3): the obstacle probe (0x100aa2ac) runs after the closing in; only when it doesn't
+  steer is the swerve (+0x85 x 450 on the control's turn +0xc) added.
+
+## Objects' kind (0x100c058b -> 0x100224c0, 0x10022876, 0x100aa8f3)
+
+- A scene object's +0x34 is its OBJ record's +0xc (the port's OBJ +4), 4 outside 0 .. 8, and 8 for the names starting
+  "tl1m" / "TL1M" (the ground tiles, 0x101245a8 / 0x101245b0). The kinds' handlers are 0x1010e508 (3 per kind; the first,
+  the walk handler, exists for kinds 0, 5, 8). The obstacle probe passes a struck object (0x100aa8f3) when its kind has a
+  walk handler and the struck polygon's |normal y| >= 0.766, or its flags (+2) & 0xf0 are 0x50.
+
+## The torso's tilt (0x10005a87 / 0x10005570 -> 0x1000d64b -> 0x1000f705; 0x1005d75c's dum_trso turn)
+
+- The fire controllers set the control's +0 = -(x x 3840), x = the pitch to the aim point (+0xe8) / 3840 stepped by the
+  decision roll (k x 2 / 65536 toward its sign), held to +-1/64: about -pitch, +-60 degrees. Mode 3's end (0x1000d70f)
+  zeroes +0 and +0xc.
+- The dum_trso object (+0x48c) is turned each move (0x1009556a order 1: Z(0) Y(a2) X(a1)): gears and infantry a1 = the
+  tilt (+0x1c) / 3 / 2, a2 = the twist (+0xc) / 1.5; classes 4 / 10 a2 = the twist only; the others a1 / a2 / a3 =
+  +0x6c / +0x70 / +0x74 (+0x6c the tilt x 0.5 only with +0x560 bit 0x2000).
+
+## The aim distance (traced: 0x1001fa46, 0x100bcd98, 0x10039b80 / 0x10039bd2, 0x100bcf44, 0x100bcec7)
+
+- The vehicle record's +0xa8 is a lag (0x10039b80: +0xa8 the clock, +0xac the target, +0xb0 the value, +0xb4 T =
+  ftol(0.2 x 181) = 36), started at 50000 (0x1001fa46). Each move (0x1005d75c -> 0x100bcd98): the 150000 ray from the eye
+  object (+0x48) along the aim (0x100bcf44) striking first an object flagged 0x100 (a vehicle) or 0x200 (a structure)
+  sets +0xc0 to its distance (2000 if within 2000); +0xac = +0xc0 (0 at the start); 0x10039bd2 steps it (integers:
+  (target - value) x ticks / T, stopping at the target). The reticle (0x10055de4) and the shots aim that far along
+  the ray (0x100bcec7).
+
+## Animations off the screen (0x10013d53, 0x10013cd8)
+
+- A vehicle other than the player's isn't stepped when its sphere (radius = the focal length (0x1011f9e8 + 0x94) x its
+  standing height (+0x53c) / its depth) lies more than 25 pixels off the view's rectangle or its depth less the radius
+  is past the far distance - unless its playing or wanted animation is one of 4 .. 8, 0xd, 0x11, 0x15, 0x17 .. 0x19
+  (0x10013cd8).
+
+## Leftovers found (not done)
+
+- The jets' flames: 0x10060491 (the control), with jumps left (+0x510 > 0) and a burn running (+0x518), calls
+  0x1005359c each step: effect 0x19 (0x1001b372) at the vehicle's mount objects in slots 4 and 5 (+0x4a8 / +0x4ac: the
+  0x126 + k table the builders fill with the weapon zones' POF objects in record order, 0x1004e6a0 / 0x1004f86d).
+- The grenade throw: firing (slot +8 == 1) a weapon whose kind (+0x10) is 0x3d with the slot's +0x20 != -2 sets +0x562
+  bit 0x800 instead of firing at once (0x100bc53d, 0x100bc69b, 0x100ba550); the throw animation's event releases it.
+- The collisions (0x1005d75c -> 0x10056c90: the player's vehicle, or one in state 2 / 4; 0x100571d7 vehicles,
+  0x10057e1e, 0x10022f92 the scene, sliding along the struck polygon; then 0x1005815c on a vehicle, 0x100589ad on an
+  object, the AFXHGCOO sounds by the speed) - traced as far as this.
+- The leg smoke (0x1007f8a9: a type-7 system with its own update / draw, 0x1007e99d / 0x1007eb46, from 0x1001b... and the
+  move's +0xc39 timer) and the foot dust (0x10086007): their systems' functions aren't followed.
+
+## The target display (F9; traced: HGSIM 0x100ad8cb, 0x10053140, 0x10026610 mode 4) - tools/heavygear.c, world_draw_flat
+
+- GAMEKEY.MAP TOGGLE_TARGET_DISPLAY F9 -> command 0x12: 0x10123d60 ^= 1, AFXHDWPS (priority 7) when the player's
+  vehicle record's +0x18 has 0x2000.
+- It is window 11's draw (0x107f22cc: +0x13c = 0x100ad8cb, +0x144 = 0x100adc95 clear, +0x138 0x100adccd, mode +0x30 =
+  8 from 0x11c; 0x100654a8 steps +0x30 through 14 modes - the MFD cycling, no default key). Window 11's table entry is
+  (25, 145) - (52, 35) in every set (x1 < x0, y1 < y0: no area). With 0x10123d60 on, each frame while the gear runs
+  (0x107f2398, the vehicle's state, == 2):
+  - a nav target (0x100): VTGT_NP / VTGT_NR (0x20: visited) through 0x100568a8 at a quarter of window 11's size in its
+    rect - clipped away by that rect;
+  - a vehicle (0x200) or a standing structure (0x400, its +0 & 4 clear): the camera block (0x1011f9f0, 0x68 bytes) is
+    saved; 0x1011fa24 = 4 (the polygon colour mode), 0x1011f9f4 = 0, 0x1011fa2c = 0, 0x1011fa28 = 0, 0x1011fa0c /
+    0x1011fa10 = 0; 0x10053140(0, the main view's own viewport +0x18, a copy of the main view, the target's object
+    (vehicle +0x44, or the GT object 0x1009e936), 0) draws that object alone (0x100915e7) with the main view's
+    camera and flushes it (0x100020d8) over the frame; the block is restored. 0x100ad8cb's other locals (the player's
+    +0xd8.. and a distance from the target's size, 0x10103730 x +0x53c) are computed and never read.
+  - 0x10026610 in mode 4 gives each polygon one colour by its object's +2 flags: 0x200 -> 0x17; 0x400 -> 7; 0x100
+    (a vehicle's part) by its object's brightness nibble (+0 & 0xf0): 0 -> 0x10, under 8 -> 0x1f, else 4 (with
+    0x10148df0 set only 21 % of the time, else 0x10), as 0x2000 | colour; any other -> 1.
+  - Window type +6 == 1 flickers the display (30 % to blank, 70 % back; 0x1014cac0), above 2 blanks it: +6 is set
+    only through 0x10021a02 (window +0x12c), which nothing calls.
+
+## Radio texts with the voices off (traced: 0x10016aa0, 0x10016f28, 0x100177d4, 0x1009a... language lookups)
+
+- A voice record (0x18 bytes: the name, +0x10 the text, +0x14 the .sfl) gets its text pointer at the sim's start
+  (0x100177d4: mov ds:[record + 0x10], [0x10187xxx]); the slots hold the language table's lookups of English keys
+  (0x100a0384: the key itself without a table). tools/ref/gen_radio_text.py lists the 274 records (src/radio_text.h);
+  a few names carry two texts (the squad replies AVOSH001 / 004 / 007, AVOSR002 / 007 / 008, AVONENGE): the port takes
+  the first.
+- 0x10016aa0 builds the message's +0x34: the first record's text, then " " and the second's when it has one, then "."
+  (0x1010ace0 / 0x1010ace4), 0x33 characters at most.
+- 0x10016f28 with the voices off (0x1012d488 == 0 or hgsnd's flag 2 clear, the voices' level 0): the text, if any, to
+  the message bar (0x1006a0ec(text, 0, 0x712, 0x32)) and the message's end (+0x2c) at the clock + 0x712; no text: the
+  start gives 0 and the message ends.
+
+## The gear lost (traced: 0x1005ca49, 0x100620b8, 0x1003ad72, 0x10036ea6, HG.EXE 0x402710)
+
+- 0x1005ca49: alone (0x10131424 == 0) the player's destroyed vehicle goes straight to state 5; in a network game to 4.
+- 0x100620b8, state 4: once, 0x10053302, 0x10148e1c = 1, view 1 (the track view); its eyepoint pan then turns by the
+  frame's ticks x 0.25 (0x10036ea6 case 1: 0x100eb72c while 0x10148e1c and no 0x101316f8). State 5: the first frame
+  sets the vehicle's +0x4d8 = the clock + 0x389, then view 4 (0x10037c73, rising over the wreck) each frame until
+  then, then 0x10148e1c = 1 (the view stays 4: nothing sets another).
+- 0x1003ad72 starts the gear-lost end only with 0x10148e1c set: "Exiting Mission Area..." and the end 0x16a ticks
+  later (0x43e in a network game). 0x10131458 (Flee to Windows) takes the other path: the end at once.
+- Flee to Windows (0x100308a8: 0x10131458 = 1): SimMain returns 0xff (its end: 0x10131458 ? 0xff : 0), and HG.EXE
+  (0x402710) returns from WinMain on (char)result == -1: the game quits.
+
+## The escape screen (traced: radio menu record 5 0x10118bb0, 0x10062baa, 0x100636da, 0x10062e8e)
+
+- Record 5: window 0x10118b80 = fractions of the screen (0x3ae1, 0x30a4) - (0x10000, 0xb333) (made pixels by
+  0x10075dd0: (147, 91) - (639, 335)), flags 0x11, background ESCAPSCR (+0x10; 'L' at index 2 at low resolution,
+  'G' at index 7 with 0x1011fa40: ESCAPSCG), its rect 0x10118b98 = (0, 0) - (1, 1) scaled about its centre by the
+  shape's canvas (frame 0's dword: width - 1 high, height - 1 low; ESCAPSCR 325 / 410) over the screen (0x10076501),
+  made pixels, then moved across to the window's left (flag 0x10); font: 0x10062e8e sets +0x44 = DAT_107ca7e0 (the
+  HUD font) for every record (the records' "SMALL6" / "BASE6X76" are replaced); colours 0x0c / 0x07 selected; 6
+  rows; title 0x2e14, numbers 0x170a, handler column 0x851f of the width.
+- The lists (labels from the language slots: MAIN MENU, Abort Mission, Monitor Brightness, Audio Ctrl, Combat
+  Variables, Flee to Windows, Accept; BRIGHTNESS; AUDIO VOLUME: Music, Sound Effects, Voice, 3Dsound; COMBAT
+  VARIABLES: Particles, Shadows, Multiple Lights, Joystick Auto Center; Off / On) and their item records are in
+  src/escmenu.h. Handlers: 0x100645c0 a slider (SLIDEBAR / SLIDEKNB, low resolution SLLDEBAR / SLLDEKNB, at the
+  handler column / 3 and the row + the font height; the knob at + value x (bar canvas width - 1) - (knob canvas
+  width - 1) / 2; a step 0x199a by the item's digit, space or the keys 200 (+) / 201 (-), held to 0 .. 0x10000);
+  0x10064deb a choice (its string at the handler column; the next / previous string). An item record: +0 flags, +4
+  value, +8 its table (shapes / strings), +0xc the context, +0x14 get, +0x18 preview, +0x1c set (list state 4,
+  Accept), +0x20 cancel (state 5).
+- Brightness: level = ftol(value x 15) (0..15, default 8), hgsnd +0x44; the 8-bit palette goes through the gamma table
+  0x107ca080 (0x1003cc10: row l, entry c = ftol((c / 63) ^ (1 / (l x 0.0625 + 0.5)) x 63)) by 0x1003cd04 when set.
+
+## The gear editor's list pictures (traced: HGSHELL 0x1013804f, 0x1013281e .. 0x101348aa, 0x1011c6c3, 0x1011c3a9, 0x1011d8bd, FUN_100b2dac / 0x100b327c, 0x1010e952 / 0x1010e9cf, 0x100b31b6) - src/garagepic.c
+
+- Each list item (FUN_100b2dac at B07BLIST) has a picture column (5, 0x19)-(0x65, 0x173) of the list and a text
+  column (0x70, 0x19)-(0xce, 0x173); an item is as tall as its text or (0x65 - 5 + 1) x 3 / 2 (+0x12d, FUN_1008f240).
+- The picture is the item's object, built once per id and kept (0x1013804f, the table at +0x17a56): the item's node
+  tree of ODFs (code + suffix: TRHP / TRLP / TRRP / TRLR / TRRR / two attach points / TRSO for a torso, ENBP an
+  engine, HDHD + EYE_HDHD a head, the arm / leg trees, a weapon's one ODF retyped by id, a left / right pair drawing
+  its first variant through 0x1011cb18 / 0x1011ce6b). 0x1011c3a9 places each node's object from its parent: a root
+  at minus the ODF's +0x118 (in memory +0x121; replaced by the place, FUN_1011d7ff), else its link's offset (+0x24 of
+  the parent's k-th link for its k-th child) less its own pivot (+0xec); an empty node sits at its parent's place and
+  hands its link on; an empty leaf is an attach point (it takes a link). Objects whose model starts POF / EYE / SOL
+  are flagged 0x1000 and not drawn (0x1011d8bd); the root is turned 180 degrees (0x1011d8bd(0)) and placed at the
+  item's view place (0x101b0012 / 16 / 1a, FUN_1011d7ff: not the editor's x 1.5).
+- Drawn (0x100b3a.., the item draw) by the shell's camera (PTR_DAT_102045e0 = 0x10204500, the editor view's) over the
+  view x 0 .. width - 1 of the column, y the entry's top .. bottom, in the column's window.
+- The turner: B07's action 0xd is FUN_1010e952(0x32, the list, -1, 0, 3.0, 0) on message 0x20 (every pass), started
+  (0x1010e48f, ftime) by action 0x10 on the screen's event 0 and stopped (0x1010e4cb) by 0x11 on event 1; each pass
+  (0x1010e9cf) it turns every item of the list's current category but the one being dragged (0x100b31b6 ->
+  0x1011d6eb -> 0x1004a555) by (0, 3, 0) x the milliseconds since the last pass / 50: 60 degrees a second about y.
+
+## The gear editor's statistics panel (traced: FUN_100a7b0a, FUN_1016c0cc, 0x100a881e / 0x100a88e4 / 0x100a89b2 / 0x100a8a2f, FUN_100e8a17, FUN_100cd05f / FUN_100cd1fe) - src/garagepanel.c, garage_design_text
+
+- B07CPRTY (501, 15)-(625, 28): "Combat Priority " (0x1022d878) and the level's name (0x101acda0 + level x 5).
+- B07WEAPS, its inner window B07WINNR (501, 43)-(623, 141): the design's items of types 5 .. 10 in order, their short
+  names (0x101aff98 + id x 0xaa), an item as tall as its text (FUN_100cd18b), font 9; FUN_100cd1fe colours by the
+  item's option word's high half (0x1011b467): 0 -> +0xce (0x0f), 1 -> +0xcf (0xb7), 2 -> +0xd0 (7), else +0xc8
+  (0xfe), from FUN_1013fa9f's FUN_100cd05f(..., 0, 9, 0xfe, 7, 5, 0xf, 0xb7, 7).
+- B07STATS (FUN_100140a7, font 9, colour 0xfe) takes rectangle +0x104 B07SINNR (0, 0, 122, 114) for a design (and a
+  torso, arms, legs, head), +0x114 B07SINNW (0, 12, ...) for weapons, +0x124 B07SINNE (0, 10, ...) for an engine,
+  drawn as FUN_10032e5f. With nothing selected its text is FUN_1016c0cc: "\n\n" (the first operator+ of 0x0a and
+  0x0a, 0x1016c2fd) "Strength: " a "\nMax Speed: " b x 6 " KPH\nSensors: " c "\nStealth: " d "\nLoad: " e "\nMax
+  Load: " f (labels from 0x10172a24, ": " 0x1023d9c4). a = 0x100a881e (torso +0x2e and its options' +0x14; engine 0
+  / 1 / 2 / 3 by HP < 600 / 750 / 950; arms +0x2e and options); d = 0x100a88e4 (torso +0x32, options' +0x18 and the
+  armour step 0x1011a14e; engine option's +0x18 and +1 / 0 / -1 / -2 / -3 by HP < 400 / 600 / 750 / 950; head +0x32
+  and its bits' options); c = 0x100a89b2 (head +0x36 and its bits' options' +0x24); b = min(0x100a73a0, 0x100a8a2f):
+  0x100a8a2f sums torso +0x3a and options' +0x1c (a strider adding its own engine's and legs' with 0x10119e00's
+  defaults), an engine's (int)sqrt(HP) and option's +0x1c, legs +0x3a and options' +0x1c, then 0x1011a099's step of
+  load over capacity (> 1.26 -8, 1.2 -6, 1.15 -5, 1.1 -4, 1.05 -3, 1.0 -2), 0 without an engine; e / f 0x100a752f /
+  0x100a7802. Checked: the stock Hunter gives the original's frame (refs b07_hunter: 2, 42 KPH, 1, -3, 6627, 6627).
+- The HP spinner (B07HPSPN and its four buttons) and the type spinner (B07_TYPE, its arrows): hidden with nothing
+  selected (FUN_10011726 / FUN_100126b0), both shown for an engine (FUN_1001170e / FUN_10012698), the type spinner
+  for a weapon whose +0x3e is 2 .. 4.
+- With an item selected the text is the item's own (0x1016d114 torso, 0x10170721 engine, 0x1016eaaf arms,
+  0x1016f7f9 legs, 0x1016df7f head, 0x10171388 weapons) from its options and armour: not done.
+
+## Medals at the debriefing (0x100df8e4, 0x100e0c.. - 0x100e10..: 22 awards, FUN_10112695 has / FUN_101126af award)
+
+- Medal 0x12 (0x100e0df9): when not held, medal 0x11 held and the HGCAR word at the frame's -0x15564 above 0, it is
+  awarded and its name (0x102565d8) and "\n" (0x10254f90) appended to the debriefing's medal text. The port awards no
+  medals yet (the chain's HGCAR fields aren't mapped).
+
+## The tour's scoring (traced: HGSHELL 0x100df8e4 from its asm, 0x1011275d) - src/debrief.c, front_mission_over
+
+- 0x100df8e4 switches on HGCAR +0x10 (2 success; 0 / 1 / 3 / 4 the rest, jump table 0x100e211a) and tests the game's
+  kind (0x1011178a: 1 for types 0 / 1, the tour). stat 11 = stat 12 first; a tour's stat 12 is the mission type B05's
+  launch stored (FUN_100e2421 with var 0x17).
+- Tour success (0x100dffff ..): the type's bonus 0x156d8 (6: 200, 7: 50, 8: 150); stats 4, 5 + 1, the bonus 0x15128
+  + 100, stats 0x10, 0x11, 3 + 1, stat 0x19 = stat 0x19 << 6 | kills & 0x3f; the campaign stats by type (byte table
+  0x100e2142, jumps 0x100e212e): 0: 0x15 + 1 and 0x16 + the kills; 5: 0x18 + 1; 7: 0x14 + 1; 0xc: 0x17 = the kills;
+  stat 0x12 as the story's (0x100e01eb).
+- Any tour outcome: the done objectives of order 1 / 2 pay 100 each (0x100e12df: 0x156dc / 0x156a8), every kill 50
+  and every death -50 (0x100e143b: [-0x1567e] u16 x -50); stat 0 + bonus + kills + deaths + type bonus + objectives
+  (0x100e145b). The story's best-kills test (0x100e1398) is the story's only.
+- Tour failure (0x100e118d ..): stat 0x10 + 1 when it equals stat 11; stats 0x11, 5, 0x12, 0x13, 0x17 = 0; stat 3 + 1
+  (tour only, 0x100e11fc); stat 0x19 << 6; the type's campaign stats 0 (0: 0x15 and 0x16; 5: 0x18; 7: 0x14).
+- A counted success (tour, or the story's first) counts the record's medal counters (+0xac + i x 4, 0x1011275d) by
+  the faction (0x10111766, [-0x15480]): faction 1 counter 2 once a kill, counter 0 for types 6 / 8; faction 0
+  counter 8 once a kill, counter 6 when stat 7 is 0x12 and counter 6 is 0. 0x1011275d: counter i + 1; five of 2 make
+  one of 3; five of 8 one of 9, four of 9 one of 10; counter 6 is set to 1. The medal awards that follow
+  (0x100e0679 .. 0x100e0fe3: the flags through 0x10112695 / 0x101126af, by stats and the counters) aren't done.
+
+## B04's second branch (FUN_100fcfcf)
+
+- A game with missions (stat 3) whose last wasn't won (stat 5 < 1) gets one mission type, drawn with the CRT's rand()
+  (FUN_10034fab): rand() % 2 == 0 keeps stat 11's first type, else an inner draw: 0: 0, else %4 -> 1 / 7 / 2 / (level
+  0x1a ? 9 : 0); 1: 3, else %3 -> 0 / 4 / (0x1a ? 9 : 3); 2: 1, else %2 -> 7 / (0x1a ? 9 : 7); 3: 1, else %3 -> 0 / 4
+  / 5; 4: 0, else %5 -> 4 / 7 / 2 / 1 / (0x1a ? 9 : 0); 5: 5, else %3 -> 1 / 2 / 7; 6 and 8: 1, else %2 -> 7 / 2; 7: 7,
+  else %3 -> 2 / 1 / (0x1a ? 9 : 7); 9: 1 or 7; others %3 -> 2 / 1 / 7.
+
+## B01, B08, the briefing map (FUN_101398eb, FUN_10145504, FUN_10112881)
+
+- B01's info boxes (FUN_100ebab2 -> FUN_100ebbde, as the list's selection changes): FUN_100140a7 boxes 0x1d (314,
+  135)-(410, 158) missions (stat 3), 0x1f (430, 135)-(526, 158) kills (stat 6), 0x21 (314, 74)-(521, 96) the rank's
+  name (0x10254808 + stat 2 x 0x10, built by 0x100e7725), 0x24 (353, 187)-(457, 206) the allegiance ("North"
+  0x10254d60 / "South" 0x10254778 by FUN_10111766), font 9, colour 0xfe. The unit panel (FUN_100ebf4b: picture 0x26,
+  the unit's insignia 0x5e + unit, its requirements and perks in font 7) isn't done.
+- B01's accept also runs FUN_100d8d94 (string vars 0xb / 0xc the two faction strings 0x10253f28 / 0x10253fc8 swapped
+  by FUN_10111766, var 0x27 = 10 / 9 - the multiplayer side's) and FUN_100f4c3e (FUN_1013804f preloads screens'
+  resources): no visible effect in the tour.
+- B08 (FUN_10145504): the name entry FUN_10013137 at (72, 43), 173 x 22, 15 characters. The allegiance spinner
+  (FUN_100edc85 -> FUN_100edcdd, var 0x29): var 0x29 zero only North (1), else North (1) and South (0). The unit
+  spinner (FUN_100edd82 -> FUN_100edde3, when the allegiance or var 0x29 changes): var 0x29 zero only unit 1; North
+  units 0..3 (pictures 0x5e..0x61), starting on 1; South 10..12 (0x68..0x6a), starting on 12.
+- FUN_10112881(e): the story copies campaign entry e's front line into the record (+0x324); every kind then draws the
+  record's. The random mission's briefing map shows the tour game's own front line.
+
+## The shell's text table (FUN_1018aca7, FUN_1018b200, FUN_1018c099)
+
+- The shell reads LANG.INI's "shell file" (shell.txt) from the game folder into a sorted table of [ENGLISH] /
+  [TRANSLATED] pairs; FUN_1018c099 / FUN_1018c0e5 look a string up there (bsearch, strcmp) and keep it when absent.
+  The English release ships no shell.txt, so every lookup gives the English text back: the port's English strings
+  are what the original shows.
+
+## Options
+
+- B64's Graphics Type (0x100e3c57): hgsnd +0x58 = the item (-1 MCGA, -2 Software 640, 0.. the Direct3D devices) and
+  +0x48 = "mcga.dll" for item -1, else "vesa480.dll". The port offers Software 640 and its 3D look as device 0
+  ("Direct3D": the original lists the system's devices) and starts a mission in the matching look.
+- Textures Off (hgsnd +0x14 / +0x18 / +0x34): the sim's FUN_10086951 -> 0x10086b2c / 0x10086bd1 clear render flags
+  0x100 / 0x200 / 0x800 (FUN_10026ed5, FUN_10094c68), and the model loader (0x100c5e73) gives models named T.., G..,
+  D.., V.., O.., S.. and W.. (not WX..) texture slot 0 (+0x40 = 0x100) instead of their materials' textures. Not done
+  (the flags' effect in the renderer and slot 0's texture aren't traced).
+- B63's return: FUN_10019126 runs the game object's (the shell's +0x44: FUN_1011e6cb, 0x365b bytes, vtable
+  0x101c5bc8) second method FUN_1002abb8: an open multiplayer session closed (dpDestroy, the result kept at +0x3c).
+
+## The multiplayer screens (traced: HGSHELL FUN_101377e4's states, FUN_1014a59f, FUN_1015e872, FUN_1015e34f, FUN_10161c82, FUN_10162415, FUN_1015118b, FUN_1015d831, FUN_101581dd, FUN_1015af7c) - src/mpscreens.c
+
+- B01's accept with a multiplayer game goes to state 0x15 (0x10139f9e: FUN_100e8f73's multiplayer arguments d / e =
+  0x15). B21 (0x15, FUN_1014a59f) is a popup (B21UNDER SHP at MPLOC (170, 98)): its list holds the connections the
+  session layer found, one per slot 0 .. 3 whose record has +0xae & 1, their name the record's +0x8c; the item's
+  value is the slot's state: 0 IPX -> 0x3a, 1 Internet -> 0x32, 2 Modem -> 0x17, 3 Null Modem -> 0x1c. The slots
+  are filled (0x1002e1xx, around 0x1002e27a) by the comm DLL's name: "Internet" 1, "Null Modem" 3, "Modem" 2, "IPX"
+  0 (the ANET folder: WINETS2.DLL, WIPX2.DLL, WMODEM2.DLL, WSERIAL2.DLL). Accept: var 0xb = the item's value
+  (FUN_100181c5), var 1 = 1, go to var 0xb; cancel: back to B01.
+- 0x3a (B58, FUN_1015e872) and 0x32 (B50, FUN_1015e34f) are action screens: the session layer opened
+  (FUN_100d3e35 / 0x100187b9), then 0x24 (IPX) or 0x3b (Internet's server list B59); on failure string var 0x13 =
+  the error, var 2 = 1, the message popup 0x4a. B59 (FUN_10161c82): accept connects to the selected server and goes
+  to 0x2d (B45, the Internet lobby); B60 (FUN_10162415) is the channel list.
+- B36 (0x24, FUN_1015118b), the LAN lobby: create (0x359) -> 0x31; join (0x35d) -> FUN_100da0fa(0x2f, 0x45, 0xd) the
+  selected session joined, 0x2f; channels (0x361) -> var 0x24 = 1, 0x3c; barracks -> 3; build -> var 1 = 5, 7;
+  abort -> 1. A timer action every 0x1388 ms (FUN_10016668(0x1388)) refreshes the lists.
+- B49 (0x31, FUN_1015d831) is a popup (LOCXY (192, 116)): the game's name, password and player count; create hosts
+  the session (FUN_100d2c22 / FUN_100d37b7 / FUN_100d2b6f) and goes to 0x2e.
+- B46 (0x2e, FUN_101581dd) the host's setup (enemies, allies, reject, the mission and its description, the gear,
+  chat, encrypt, launch, abort); B47 (0x2f, FUN_1015af7c) a joiner's (ready instead of launch and reject); their
+  errors go to 0x4a with var 0x3b = 2.
+- B24 / B25 (0x18 / 0x19) are the same pair for the direct links (modem B23, null modem B28); B39 (0x27,
+  FUN_10152777) is the multiplayer debriefing (status, objectives, statistics, the after-action text; abort sets var
+  0x29 = 2); its death movies are state 0x4b (FUN_1016b0fa).
+- The multiplayer missions: FUN_1006540f builds the random mission generator for multiplayer: +4 = 2 (the 'M'
+  templates), +0x18 the type, +0x1c the side, +0x6c (and +0x70 = !+0x6c), the threat +0xa8 / +0xac, the front line
+  at +0xd0. FUN_1011f0bf (the session's message pump: "has entered the room", "killed", "scored a hit on" ... through
+  the language table FUN_1018c099) calls it for the session's type (+0x1077) with (side, +0x6c) = (0, 0), (0, 1),
+  (1, 1), (1, 0). M99MSCN1 (free for all) includes start00 .. start07 (a nav each) and en00star .. en07star (the
+  players' records, written by the shell: not traced; only EN00STAR.BWD / EN01STAR.BWD are named in HGSHELL).
+- The generated ground (RANDMESH, a copy of an Mnn_GRND record) and the Mnn_GRND records sit inside a BLKX block
+  (scale 1, turn 0, a position such as (-15000, 0, 25000)): their OBJs are the ground too (the port took a BLKX in a
+  ground record as not ground; no story mission's ground changes).
+
+## Point lights (traced: 0x1001b3a1, 0x1004b275, 0x1004b2e1, 0x1004b193, 0x1004b44a, 0x1004b7f3, 0x1004bad6, 0x1009250c) - src/world.c
+
+- The vertex record (0x58 bytes, the mesh's +0x30 + 0x18): +0..+8 the model position, +0xc..+0x14 the world position
+  (0x1000421b: M v + T, rewritten when the object moves, 0x10095797; 0x10092667 subtracts the eye from it), +0x30..+0x38
+  the model-space normal, +0x3c the intensity (then the colour sums in its upper bytes), +0x29 bit 2 lit this frame.
+- 0x1009250c takes six floats (position, normal; the decompile shows four): with 0x107c276c set it is
+  dot(normal, 0x107c2f84..) (a direction); clear, d = 0x107c2f84.. - position, all |d| under 1e-7 (0x101035e0) gives
+  0x7f, else ftol(dot(normal, d) / |d| x 128 (0x101035e8)), held to -127..127.
+- An effect takes a light when 0x1001b3a1's flag is set and the effect found a slot: kinds 1 / 2 / 6, 0x24, 0x3d /
+  0x40 / 0x41 / 0x42 / 0x44 / 0x45 always; 0x3b, 0x3e, 0x3f, 0x43 / 0x46 / 0x47 / 0x48 only off a vehicle and on a
+  strike flagged 0x400 (combat_effect_light). 0x1004b275 (nothing with 0x10118194 off) takes a record off the pool of
+  0x100 (0x107c2fa0, 0x4c bytes; the list 0x10138d14 in taking order), age +0x48 = 0; 0x1004b2e1(slot, 0xf): the strike
+  point at +0x14..+0x1c, type 1, radius +0x3c = 20000.0, life +0x44 = the effect table's +0 (gear_effect[].gate).
+  0x1004b193, once a frame: each light whose life isn't -1 ages by the frame's ticks (0x10130770) and is freed past it.
+- 0x10118194 is 1 at load; 0x10086a8e -> 0x1004b2c4 sets it from hgsnd.cfg +0x2c (B64's multiple lights).
+- 0x1004b44a, per object drawn: each light's +0x20..+0x28 = M^T (light - the object's position) (model space).
+- 0x1004bad6's last pass runs with 0x10118194 on, 0x1011fa24 != 3 and either (fog off - 0x1014b9b0, SKYGND's fogswitch -
+  and the software look, 0x1014a5e8 = 0) or (3D, the polygon not a sequence kind 0xb000 .. 0xe000). For each light:
+  0x1004b7f3 needs one of the polygon's vertices' world positions inside the light's box (position +- radius, each
+  axis, inclusive); then 0x107c2f84.. = the light's model position minus the polygon's first vertex's model position
+  (+0..+8), "near" when every component is under 1e-7 (0x1010113c); each vertex not yet lit this frame whose intensity
+  is under 0x80 takes 0x80 when near, else 0x1009250c(its world position +0xc, its model normal +0x30) with 0x107c276c
+  clear, and adds it when positive (the colour sums take 0xff). The spaces are mixed as written: (model light - model
+  first vertex) - world vertex, dotted with the model normal. Then the usual end: x 2 in 3D, held to 0x80, scaled.
+
+## The view's roll (traced: 0x100373fc, 0x10052411)
+
+- In the cockpit (0x10148e1c clear) the camera's roll is the eye object's roll / 10 (0x100eb744): 0x10095133 ->
+  0x10052411 takes the object's matrix apart as pitch = -asin(m5), yaw = atan2(m2, m8), roll = atan2(m3, m4) (R = Ry Rx Rz
+  as 0x10051fb0 builds it). The pitch and yaw are the vehicle's +0x60 / +0x64 plus +0x6c / +0x70 (the tilt and twist).
+
+## The damage nibble (traced: 0x1005c1f8, 0x1009630b, 0x10026610, 0x100c1152's PLNT)
+
+- 0x1005c1f8, after a hit on zone z: level = 15 - ftol((internal x 0.5 + armor x 0.5) x 3.0 / the zone's +0x38) (+0x38 the
+  zone's (internal + armor) / 10 as built), and 0x1009630b raises the object flags' 0xf0 nibble (object +0) to it on
+  the vehicle's parts whose +0x26 is z (never lowers it).
+- 0x10026610, after 0x1004bad6, for a polygon of an object flagged 0x100 or 0xf0 == 0x50 (+2) with nibble n > 0 (and
+  0x1011fa24 != 3): with PLNT header +0x3c set (0x10130834; 1 in every shipped mission) the shade 0..7 takes
+  ftol(n x (15 - shade) / 15) and each vertex's row (low byte) ftol(n x (15 - row) / 15): rows move towards 15 as the
+  zone is wrecked. With it clear: ftol((16 - n) / 16) = 0, so the rows and the shade go to 0.
+- 0x50 is put on a part's object by 0x100963c2 (0x10096474: a destroyed zone with 0x1005ab68's last argument set; also
+  0x1001e89f); the 0x100 on vehicle parts has no setter found (0x10003d68's callers: 0x1002cc03 an attached object,
+  0x1002f02b the 0x107cb500 objects from their +0x74 flags).
+- 0x100012c5 (re-checked): the software branch hands I76DRAW row << 3 (no | 7), the 3D branch row << 3 | 7.
 
 ## Running the original for reference (findings from Windows 98 / Wine attempts)
 

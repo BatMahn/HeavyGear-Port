@@ -46,6 +46,19 @@ int wave_parse(const uint8_t *d, size_t len, hg_wave *w)
     return -1;
 }
 
+int wave_raw8(const uint8_t *d, size_t len, int rate, hg_wave *w)
+{
+    memset(w, 0, sizeof *w);
+    if (!d || !len || rate <= 0) return -1;
+    w->pcm = malloc(len * sizeof *w->pcm);
+    if (!w->pcm) return -1;
+    for (size_t i = 0; i < len; i++) w->pcm[i] = (int16_t)((d[i] - 128) * 256);
+    w->frames = (int)len;
+    w->channels = 1;
+    w->rate = rate;
+    return 0;
+}
+
 void wave_free(hg_wave *w)
 {
     free(w->pcm);
@@ -74,7 +87,17 @@ static struct {
     music_src        mus;
     int              mus_on;
     float            sfx_vol, mus_vol;
+    int              lvl_fx, lvl_voice, lvl_mus;
 } A;
+
+/* the music's gain at its level (see audio.h): a CD track linear, a file's buffer in hundredths of a dB */
+static float mus_gain(const music_src *m)
+{
+    int l = A.lvl_mus > 0xffff ? 0xffff : A.lvl_mus;
+    if (l <= 0) return 0;
+    if (!m->wav && !m->pcm) return (float)l / 65535.0f;
+    return audio_db((int)(-3333.0 + 3333.0 * (double)l / 65535.0));
+}
 
 static int mus_read(music_src *m, float *out, int frames)
 {
@@ -97,7 +120,7 @@ static int mus_read(music_src *m, float *out, int frames)
             if (n > (int)(sizeof buf / bps)) n = (int)(sizeof buf / bps);
             if (n > m->frames - m->at) n = (int)(m->frames - m->at);
             if (fseek(m->f, m->start + m->at * bps, SEEK_SET) || fread(buf, (size_t)bps, (size_t)n, m->f) != (size_t)n) return done;
-            /* played at 44.1 kHz, a CD rip's rate (a file at another rate plays off-speed) */
+            /* 44.1 kHz here (other rates are resampled whole when opened) */
             for (int i = 0; i < n; i++) {
                 const uint8_t *p = buf + i * bps;
                 float l, r;
@@ -160,7 +183,8 @@ static void SDLCALL feed(void *ud, SDL_AudioStream *st, int need, int total)
     if (A.mus_on) {
         int got = mus_read(&A.mus, mus, frames);
         if (got < frames && A.mus.frames <= 0) A.mus_on = 0;
-        for (int i = 0; i < 2 * got; i++) mix[i] += mus[i] * A.mus_vol;
+        float mg = A.mus_vol * mus_gain(&A.mus);
+        for (int i = 0; i < 2 * got; i++) mix[i] += mus[i] * mg;
     }
     SDL_UnlockMutex(A.mx);
     for (int i = 0; i < 2 * frames; i++) mix[i] = mix[i] > 1 ? 1 : mix[i] < -1 ? -1 : mix[i];
@@ -176,6 +200,7 @@ int audio_open(void)
     SDL_AudioSpec spec = {SDL_AUDIO_F32, 2, RATE};
     A.mx = SDL_CreateMutex();
     A.sfx_vol = A.mus_vol = 1.0f;
+    A.lvl_fx = A.lvl_voice = A.lvl_mus = 0x10000;
     A.st = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, feed, NULL);
     if (!A.st) { SDL_DestroyMutex(A.mx); A.mx = NULL; return -1; }
     SDL_ResumeAudioStreamDevice(A.st);
@@ -271,6 +296,79 @@ int audio_playing(int voice)
     return on;
 }
 
+void audio_set_rate(int voice, int hz)
+{
+    if (!A.st || voice <= 0 || hz <= 0) return;
+    SDL_LockMutex(A.mx);
+    for (int k = 0; k < VOICES; k++)
+        if (A.v[k].w && A.v[k].id == voice) A.v[k].step = (double)hz / RATE;
+    SDL_UnlockMutex(A.mx);
+}
+
+void audio_cfg_default(hg_sndcfg *c)
+{
+    /* HGSIM 0x10108c20 */
+    static const int32_t def[27] = {0x10000, 0x10000, 0x10000, 0x10000, 11, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 8,
+                                    0x6167636d, 0x6c6c642e};   /* "mcga.dll" */
+    memcpy(c->v, def, sizeof c->v);
+}
+
+int audio_cfg_load(const char *game_dir, hg_sndcfg *c)
+{
+    char p[1200];
+    audio_cfg_default(c);
+    if (!game_dir || fs_find_ci(game_dir, "hgsnd.cfg", p, sizeof p)) return -1;
+    FILE *f = fopen(p, "rb");
+    if (!f) return -1;
+    uint8_t b[0x6c];
+    int ok = fread(b, 1, sizeof b, f) == sizeof b;
+    fclose(f);
+    if (!ok) { audio_cfg_default(c); return -1; }
+    for (int i = 0; i < 27; i++) c->v[i] = (int32_t)rd32(b + 4 * i);
+    return 0;
+}
+
+int audio_cfg_save(const char *game_dir, const hg_sndcfg *c)
+{
+    char p[1200];
+    if (!game_dir) return -1;
+    if (fs_find_ci(game_dir, "hgsnd.cfg", p, sizeof p)) snprintf(p, sizeof p, "%s/hgsnd.cfg", game_dir);
+    FILE *f = fopen(p, "wb");
+    if (!f) return -1;
+    uint8_t b[0x6c];
+    for (int i = 0; i < 27; i++) {
+        uint32_t v = (uint32_t)c->v[i];
+        b[4 * i] = (uint8_t)v; b[4 * i + 1] = (uint8_t)(v >> 8); b[4 * i + 2] = (uint8_t)(v >> 16); b[4 * i + 3] = (uint8_t)(v >> 24);
+    }
+    int ok = fwrite(b, 1, sizeof b, f) == sizeof b;
+    return fclose(f) || !ok ? -1 : 0;
+}
+
+int audio_level_db(int vol, int level)
+{
+    /* fild vol; (level - 0xffff) x ((vol - 10000) / 65535.0f); fsubp; ftol */
+    float k = (float)(vol - 10000) / 65535.0f;
+    return (int)((double)vol - (double)(level - 0xffff) * (double)k);
+}
+
+void audio_set_levels(int fx, int voice, int music)
+{
+    if (A.mx) SDL_LockMutex(A.mx);
+    A.lvl_fx = fx; A.lvl_voice = voice; A.lvl_mus = music;
+    if (A.mx) SDL_UnlockMutex(A.mx);
+}
+
+int audio_level(int which)
+{
+    if (!A.st) return 0x10000;
+    return which == SNDCFG_FX ? A.lvl_fx : which == SNDCFG_VOICE ? A.lvl_voice : which == SNDCFG_MUSIC ? A.lvl_mus : 0x10000;
+}
+
+void audio_cfg_apply(const hg_sndcfg *c)
+{
+    audio_set_levels(c->v[SNDCFG_FX], c->v[SNDCFG_VOICE], c->v[SNDCFG_MUSIC]);
+}
+
 void audio_set_volume(float sfx, float music)
 {
     if (!A.st) return;
@@ -309,10 +407,28 @@ static int open_wav_file(const char *path, music_src *m)
     return -1;
 }
 
-/* a music file: WAV, else MP3 or Ogg Vorbis (decoded whole, src/codecs.c) */
+/* a music file: WAV (streamed at 44.1 kHz, else decoded whole and resampled), else MP3, Ogg Vorbis or FLAC
+ * (decoded whole, src/codecs.c) */
 static int open_music_file(const char *path, music_src *m)
 {
-    if (!open_wav_file(path, m)) return 0;
+    if (!open_wav_file(path, m)) {
+        if (m->rate == 44100) return 0;
+        /* another rate: the data read whole and resampled to 44.1 kHz stereo */
+        int bps = m->bits / 8 * m->channels;
+        uint8_t *raw = malloc((size_t)(m->frames > 0 ? m->frames : 1) * bps);
+        int16_t *in = malloc((size_t)(m->frames > 0 ? m->frames : 1) * m->channels * sizeof *in), *out = NULL;
+        long got = 0;
+        if (raw && in && !fseek(m->f, m->start, SEEK_SET)) got = (long)fread(raw, (size_t)bps, (size_t)m->frames, m->f);
+        for (long i = 0; i < got * m->channels; i++)
+            in[i] = m->bits == 8 ? (int16_t)((raw[i] - 128) << 8) : (int16_t)rd16(raw + 2 * i);
+        long n = got > 0 ? codec_to_cd(in, got, m->channels, m->rate, &out) : -1;
+        free(raw); free(in);
+        fclose(m->f);
+        if (n <= 0) { free(out); memset(m, 0, sizeof *m); return -1; }
+        memset(m, 0, sizeof *m);
+        m->pcm = out; m->frames = n; m->channels = 2; m->rate = 44100; m->bits = 16;
+        return 0;
+    }
     int16_t *pcm = NULL;
     long n = codec_decode_file(path, &pcm);
     if (n <= 0) { free(pcm); return -1; }
@@ -371,10 +487,11 @@ static int from_music_dir(const char *dir, int track, music_src *m)
 {
     char md[1200], name[32], p[1200];
     if (fs_find_ci(dir, "music", md, sizeof md)) return -1;
-    /* track02.wav / track2.wav, else the same names as .ogg / .mp3 (the port's addition: the original reads CD audio,
+    /* track02.wav / track2.wav, else the same names as .ogg / .mp3 / .flac (the port's addition: the original reads CD audio,
      * or wavmap.ini's WAVs) */
-    const char *fmt[] = {"track%02d.wav", "track%d.wav", "track%02d.ogg", "track%d.ogg", "track%02d.mp3", "track%d.mp3"};
-    for (int i = 0; i < 6; i++) {
+    const char *fmt[] = {"track%02d.wav", "track%d.wav", "track%02d.ogg", "track%d.ogg", "track%02d.mp3", "track%d.mp3",
+                         "track%02d.flac", "track%d.flac"};
+    for (int i = 0; i < 8; i++) {
         snprintf(name, sizeof name, fmt[i], track);
         if (!fs_find_ci(md, name, p, sizeof p) && !open_music_file(p, m)) return 0;
     }
@@ -523,4 +640,52 @@ void audio_music_stop(void)
     memset(&A.mus, 0, sizeof A.mus);
     A.mus_on = 0;
     SDL_UnlockMutex(A.mx);
+}
+
+/* ---- the .sfl files ---- */
+
+static struct { char dir[1200]; char (*name)[16]; int n; } SFL;
+
+int audio_sfl_scan(const char *game_dir)
+{
+    free(SFL.name);
+    memset(&SFL, 0, sizeof SFL);
+    if (!game_dir) return 0;
+    char cd[1200];
+    const char *roots[2] = {game_dir, NULL};
+    if (!fs_find_ci(game_dir, "cd", cd, sizeof cd)) roots[1] = cd;
+    for (int r = 0; r < 2 && !SFL.n; r++) {
+        char kd[1200];
+        if (!roots[r] || fs_find_ci(roots[r], "keating", kd, sizeof kd)) continue;
+        int n = 0;
+        char **names = SDL_GlobDirectory(kd, "*.sfl", SDL_GLOB_CASEINSENSITIVE, &n);
+        if (!names) continue;
+        SFL.name = calloc((size_t)(n > 0 ? n : 1), sizeof *SFL.name);
+        for (int i = 0; SFL.name && i < n; i++) {
+            size_t L = strlen(names[i]);
+            if (L < 5 || L - 4 >= sizeof SFL.name[0]) continue;
+            for (size_t k = 0; k < L - 4; k++) SFL.name[SFL.n][k] = (char)tolower((unsigned char)names[i][k]);
+            SFL.name[SFL.n][L - 4] = 0;
+            SFL.n++;
+        }
+        SDL_free(names);
+        snprintf(SFL.dir, sizeof SFL.dir, "%s", kd);
+    }
+    return SFL.n;
+}
+
+uint8_t *audio_sfl_load(const char *name, size_t *len)
+{
+    char key[16], f[32], p[1300];
+    size_t k = 0;
+    if (!name) return NULL;
+    for (; k < sizeof key - 1 && name[k]; k++) key[k] = (char)tolower((unsigned char)name[k]);
+    key[k] = 0;
+    for (int i = 0; i < SFL.n; i++) {
+        if (strcmp(SFL.name[i], key)) continue;
+        snprintf(f, sizeof f, "%s.sfl", key);
+        if (fs_find_ci(SFL.dir, f, p, sizeof p)) return NULL;
+        return fs_read_all(p, len);
+    }
+    return NULL;
 }

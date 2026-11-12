@@ -8,9 +8,16 @@
 *.o
 /dist/
 /test_combat
+/test_particles
+/test_audio
 /test_objectives
 /test_radio
 /test_effects
 /test_garage
 /test_squad
 __pycache__/
+/test_debrief
+/test_modes
+/test_views
+/test_rmg
+/test_net

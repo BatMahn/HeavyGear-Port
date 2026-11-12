@@ -22,11 +22,17 @@ typedef struct modelview modelview;
 
 modelview *modelview_open(hg_archive *a);
 void       modelview_close(modelview *v);
+/* the light's ambient (+0x2a): 45 by default */
+void       modelview_set_ambient(modelview *v, int ambient);
 /* show a GDF's model ("gacheeta"); "" or NULL none. 0 if loaded */
 int        modelview_set_gear(modelview *v, const char *gdf);
 /* show a GDF in memory (the editor's design); extra[rec], when given and not "", is a model drawn at record rec's place
  * besides the GDF's parts (a grenade's: the GDF has POF_HWLH there, the view the grenade item's own ODF model) */
 int        modelview_set_data(modelview *v, const uint8_t *d, size_t len, const char (*extra)[9]);
+/* show loose models, each at its place from the root (an equipment item's picture, design_item_picture) */
+int        modelview_set_parts(modelview *v, const char (*model)[9], const float (*pos)[3], int n);
+/* limit the drawing to the screen rectangle (x0, y0)-(x1, y1) (the window the view sits in); on 0 none */
+void       modelview_clip(modelview *v, int on, int x0, int y0, int x1, int y1);
 /* draw into out (640 x 480 ARGB) as the view (x0, y0)-(x1, y1) of the shell's camera, the model's root at place[],
  * turned `turn` degrees about y; pal the screen's palette (NULL: the true-colour TEX look). Only the model's pixels
  * are written */

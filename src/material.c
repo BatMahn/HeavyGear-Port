@@ -62,8 +62,10 @@ int material_load_tabl(material_set *s, hg_archive *a, const uint8_t *bwd, size_
     return loaded;
 }
 
-/* The engine keeps the first matching entry of the loaded tables (lookups INFERRED to be case-sensitive strcmp, as
- * 0x100c5e73 compares labels; case-insensitive here so a differently-cased table still resolves). */
+/* The engine files each entry in a tree keyed by its first letter, its first four bytes and then strcmp
+ * (0x100bf2f7), a repeated name being dropped - so the first loaded entry wins - and looks a polygon's label up upper-
+ * cased (0x100ea690) the same way (0x100c5c07). Every table entry in the game is upper case, so comparing without
+ * regard to case finds the same entries. */
 const tlt_entry *material_find_label(const material_set *s, const char *label)
 {
     for (int i = 0; i < s->ntlt; i++)

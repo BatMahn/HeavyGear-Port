@@ -1,4 +1,5 @@
 #include "effects.h"
+#include "hgrand.h"
 
 #include "gear_tables.h"
 
@@ -30,20 +31,9 @@ void effects_splash(effects *fx, int dt)
     }
 }
 
-/* rand() as the original's C library (MSVC: seed * 214013 + 2531011, bits 16..30) */
-static int crand(effects *fx)
-{
-    fx->seed = fx->seed * 214013u + 2531011u;
-    return (int)(fx->seed >> 16 & 0x7fff);
-}
-
-/* the sim's normal table (0x10089da0): 30 rand()s summed, scaled to a mean of 0 and a deviation of 1024 */
-static int nrand(effects *fx)
-{
-    int sum = 0;
-    for (int k = 0; k < 30; k++) sum += crand(fx);
-    return (int)(((double)sum * 2.0 * sqrt(90.0) / 983010.0 - sqrt(90.0)) * 1024.0);
-}
+/* the sim's tables (src/hgrand.c): 0x10089e69's uniform draws and 0x10089ea9's normal ones (0x1001e76f, 0x100533d2) */
+static int crand(effects *fx) { (void)fx; return hg_rand(0x8000); }
+static int nrand(effects *fx) { (void)fx; return hg_nrand(); }
 
 static fx_slot *take(effects *fx, int type)
 {
@@ -68,7 +58,7 @@ int effects_debris(effects *fx, float x, float y, float z, int n)
     while (k < n) {
         fx_slot *s = take(fx, 0x0b);
         if (!s) break;
-        s->on = 1; s->body = 1; s->follow = -1; s->owner = fx->owner;
+        s->on = 1; s->body = 1; s->follow = -1; s->mount = -1; s->owner = fx->owner;
         s->x = x; s->y = y; s->z = z;
         s->left = 1810;   /* 0x1011bbfc */
         s->age = 0;
@@ -185,6 +175,7 @@ int effects_start(effects *fx, int type, float x, float y, float z, int follow)
     s->age = 0;
     s->body = 0;
     s->follow = -1;
+    s->mount = -1;
     s->owner = fx->owner;
     if (flags & 1) {
         float p[3];
@@ -215,6 +206,16 @@ void effects_tick(effects *fx, int dt)
         fx_slot *s = &fx->s[i];
         if (!s->on) continue;
         for (int t = 0; t < dt && s->body; t++) fly(fx, s);
+        if (s->mount >= 0) {   /* 0x100bd13f: hung on the weapon's mount */
+            float p[3], yaw = s->myaw;
+            if (fx->ops.vehicle_pos(fx->ops.ctx, s->mount, p)) {
+                if (fx->ops.vehicle_yaw) fx->ops.vehicle_yaw(fx->ops.ctx, s->mount, &yaw);
+                float d = (yaw - s->myaw) * 3.14159265f / 180.0f, c = cosf(d), sn = sinf(d);
+                s->x = p[0] + s->mo[0] * c + s->mo[2] * sn;
+                s->y = p[1] + s->mo[1];
+                s->z = p[2] - s->mo[0] * sn + s->mo[2] * c;
+            }
+        }
         if (s->follow >= 0) {   /* 0x1001c40d: at the vehicle, 300 below its origin */
             float p[3];
             if (fx->ops.vehicle_pos(fx->ops.ctx, s->follow, p)) { s->x = p[0]; s->y = p[1] - 300.0f; s->z = p[2]; }
@@ -235,4 +236,29 @@ int effects_active(const effects *fx)
     int k = 0;
     for (int i = 0; i < fx->n; i++) k += fx->s[i].on;
     return k;
+}
+
+void effects_set_splash_all(effects *fx, int on)
+{
+    fx->splash_all = on != 0;
+}
+
+int effects_start_on(effects *fx, int type, float x, float y, float z, int vehicle)
+{
+    if (!effects_start(fx, type, x, y, z, -1)) return 0;
+    float p[3];
+    if (((type >= 0x17 && type <= 0x21) && type != 0x4c) && vehicle >= 0 && fx->ops.vehicle_pos &&
+        fx->ops.vehicle_pos(fx->ops.ctx, vehicle, p)) {
+        /* the slot effects_start just took: the running one of the type at the spot, age 0 */
+        for (int i = 0; i < fx->n; i++) {
+            fx_slot *s = &fx->s[i];
+            if (!s->on || s->type != type || s->age || s->x != x || s->y != y || s->z != z || s->mount >= 0) continue;
+            s->mount = vehicle;
+            s->mo[0] = x - p[0]; s->mo[1] = y - p[1]; s->mo[2] = z - p[2];
+            s->myaw = 0;
+            if (fx->ops.vehicle_yaw) fx->ops.vehicle_yaw(fx->ops.ctx, vehicle, &s->myaw);
+            break;
+        }
+    }
+    return 1;
 }

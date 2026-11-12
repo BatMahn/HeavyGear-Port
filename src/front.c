@@ -1,11 +1,17 @@
 #include "front.h"
 
 #include "design.h"
+#include "garagepanel.h"
 #include "garage.h"
+#include "tour.h"
 
 #include "audio.h"
+#include "barracks.h"
+#include "options.h"
+#include "mpscreens.h"
 #include "brf.h"
 #include "career.h"
+#include "debrief.h"
 #include "shell.h"
 #include "shell_picture.h"
 #include "shell_tables.h"
@@ -36,8 +42,18 @@ enum {
     OP_GARAGE_CAT,      /* B07's category buttons (FUN_10076573 + FUN_100f11d7): the left list shows type a */
     OP_GARAGE_SCROLL,   /* the left list's arrows: a = dir */
     OP_GARAGE_GEAR,     /* the gear name selector's arrows (FUN_100a041c, the briefing's gear list): a = dir */
+    OP_GARAGE_ACCEPT,   /* B07's accept (FUN_1013fa9f, event 8): under 5 of top speed the question, else keep and back */
     OP_GARAGE_KEEP,     /* FUN_100f08c0: the selector's gear becomes the game's (the record's +0x14) */
     OP_GARAGE_DELETE,   /* delete piece (0x100f1aca -> the view's 0x100a9db6 -> 0x100bf2c0): the selected item goes */
+    OP_BARRACKS_EXIT,   /* FUN_100efccb -> 0x100efd1a: stat 7 = the unit list's selected unit */
+    OP_OPTIONS,         /* B64: a = 0 accept (FUN_100e3bae: the spinners saved), 1 cancel (FUN_100e3ed0), 2 defaults */
+    OP_TOUR_ROUTE,      /* FUN_100e8f73 (a, b, c, d, e) -> 0x100e9072: story c, tour a (faction 1) / b, multiplayer d / e */
+    OP_TOUR_NEW,        /* B08's accept (FUN_100ea492 -> FUN_100ea4fc): a tour game of B08's name, faction and unit */
+    OP_TOUR_GEN,        /* FUN_100fcbc3 (0x15, 0x16, 0x17, 0x19, 2, 3) -> 0x100fcc3f: the random mission */
+    OP_TOUR_TYPE,       /* FUN_100181c5 (B04's list, 0x17): var 0x17 = the selected mission type */
+    OP_TOUR_PICK,       /* B08's spinners: a = 0 faction, 1 unit; b = dir */
+    OP_MP,              /* the multiplayer screens' actions (src/mpscreens.h mps_action): a = the action, b = dir */
+    OP_TRAIN_SCN,       /* FUN_100e2504 (list, 2): string 2 = the scenario of the training list's mission */
 };
 
 typedef struct { int op, a, b, c; const char *s; } action;
@@ -101,7 +117,7 @@ static const struct { int state; const char *stem; action act[8]; } buttons[] = 
     {0x07, "B07ARBD", {{OP_GARAGE_SCROLL, 1}}},
     {0x07, "B07G_LT", {{OP_GARAGE_GEAR, -1}}},
     {0x07, "B07G_RT", {{OP_GARAGE_GEAR, 1}}},
-    {0x07, "B07ACCT", {{OP_GARAGE_KEEP}, {OP_GOTO_VAR, 1}}},
+    {0x07, "B07ACCT", {{OP_GARAGE_ACCEPT}}},
     {0x07, "B07CNCL", {{OP_GOTO_VAR, 1}}},
     {0x07, "B07DEL_", {{OP_GARAGE_DELETE}}},
     /* clear (0x19b): var 0x2b = 0, the question (0x1023d828), the confirmation popup; its yes clears (pop below) */
@@ -110,11 +126,77 @@ static const struct { int state; const char *stem; action act[8]; } buttons[] = 
     {0x06, "B06LNCH", {{OP_SETVAR, 0, 0x06}, {OP_SET_MISSION, 0x1a, 0x17}, {OP_SAVE}, {OP_LAUNCH}}},
     {0x06, "B06ABRT", {{OP_GOTO, 0x14}}},
     {0x06, "B06CONT", {{OP_PILOTS_LOST}, {OP_MISSION_VAR, 0x1a}, {OP_SETVAR, 2, 0x05}, {OP_SETVAR, 1, 0x06}, {OP_BY_CLASS, 0x04, 0x0e, 0x0e}}},
-    {0x03, "B03EXIT", {{OP_GOTO_VAR, 1}}},
+    {0x03, "B03EXIT", {{OP_BARRACKS_EXIT}, {OP_GOTO_VAR, 1}}},
+    /* training (FUN_10147d38, B16): launch = var 0 = 0x11, string 2 = the mission's scenario (FUN_100e2504), launch;
+     * the briefing button plays the narration (FUN_100ffb39); abort to the main menu */
+    {0x10, "B16BBRF", {{OP_NARRATE}}},
+    {0x10, "B16LNCH", {{OP_SETVAR, 0, 0x11}, {OP_TRAIN_SCN}, {OP_LAUNCH}}},
+    {0x10, "B16ABRT", {{OP_GOTO, 0x00}}},
+    /* the training debriefing (FUN_10148c3b, B17): launch again (var 0 = 0x11, FUN_100df6b3), abort to training */
+    {0x11, "B06LNCH", {{OP_SETVAR, 0, 0x11}, {OP_LAUNCH}}},
+    {0x11, "B17ABRT", {{OP_GOTO, 0x10}}},
+    /* the options popup (FUN_10163311, B63, opened by Esc): credits 0x43, environment (var 0x1e = 0, 0x40), return to
+     * the main menu, quit, cancel (the state in var 3). Controls (var 0x1e = 1, 0x41, B65) isn't done */
+    {0x3f, "B63CRED", {{OP_GOTO, 0x43}}},
+    {0x3f, "B63ENVR", {{OP_SETVAR, 0x1e, 0}, {OP_GOTO, 0x40}}},
+    /* B63's return: FUN_10019126 runs the game object's (the shell's +0x44, FUN_1011e6cb, vtable 0x101c5bc8) second
+     * method, FUN_1002abb8: an open multiplayer session closed (dpDestroy); nothing in single-player */
+    {0x3f, "B63RETN", {{OP_GOTO, 0x00}}},
+    {0x3f, "B63QUIT", {{OP_QUIT}}},
+    {0x3f, "B63CNCL", {{OP_POP}}},
+    /* the environment screen (FUN_10163a91, B64) */
+    {0x40, "B64ACCT", {{OP_OPTIONS, 0}, {OP_GOTO_VAR, 3}}},
+    {0x40, "B64CNCL", {{OP_OPTIONS, 1}, {OP_GOTO_VAR, 3}}},
+    {0x40, "B64DFLT", {{OP_OPTIONS, 2}}},
+    /* the credits (FUN_10169569, B67) */
+    {0x43, "B67CNCL", {{OP_GOTO_VAR, 3}}},
+    /* the Tour of Duty: B01 (FUN_101398eb) its games; B08 (FUN_10145504) a new one; B02 / B09 (FUN_1013a75a /
+     * FUN_10145eff) the hubs; B04 (FUN_1013b3e7) the mission choice, then B05 and B06 as the story's */
+    {0x01, "B01DEL_", {{OP_SETSTR, 0x13, 0, 0, "Are you sure you want to delete this game?"}, {OP_PUSH, 0x48}}},
+    /* the multiplayer screens (FUN_1014a59f B21, FUN_1015118b B36, FUN_1015d831 B49, FUN_101581dd B46, FUN_1015af7c
+     * B47, FUN_10152777 B39; src/mpscreens.h) */
+    {0x15, "B21ACCT", {{OP_MP, 0}}},
+    {0x15, "B21CNCL", {{OP_GOTO, 0x01}}},
+    {0x24, "B36CREA", {{OP_GOTO, 0x31}}},
+    {0x24, "B36JOIN", {{OP_MP, 2}}},
+    {0x24, "B36BARR", {{OP_SETVAR, 0x24, 1}, {OP_GOTO, 0x03}}},
+    {0x24, "B36ABRT", {{OP_MP, 3}, {OP_GOTO, 0x01}}},
+    {0x24, "B36S_UP", {{OP_MP, 9, -1}}},
+    {0x24, "B36S_DN", {{OP_MP, 9, 1}}},
+    {0x31, "B49CREA", {{OP_MP, 4}}},
+    {0x31, "B49CNCL", {{OP_GOTO, 0x24}}},
+    {0x31, "B49C_UP", {{OP_MP, 12, 1}}},
+    {0x31, "B49C_DN", {{OP_MP, 12, -1}}},
+    {0x2e, "B46LNCH", {{OP_MP, 6}}},
+    {0x2e, "B46ABRT", {{OP_MP, 7}}},
+    {0x2e, "B46M_LT", {{OP_MP, 13, -1}}},
+    {0x2e, "B46M_RT", {{OP_MP, 13, 1}}},
+    {0x2f, "B47REDY", {{OP_MP, 8}}},
+    {0x2f, "B47ABRT", {{OP_MP, 7}}},
+    {0x27, "B39CONT", {{OP_GOTO, 0x24}}},
+    {0x27, "B39ABRT", {{OP_SETVAR, 0x29, 2}, {OP_GOTO, 0x01}}},
+    {0x01, "B01ACCT", {{OP_SELECT_GAME}, {OP_SETVAR, 0x15, -2}, {OP_TOUR_ROUTE, 2, 9, -1}}},
+    {0x01, "B01NEW_", {{OP_SETVAR, 1, 1}, {OP_GOTO, 0x08}}},
+    {0x01, "B01ABRT", {{OP_GOTO, 0x00}}},
+    {0x08, "B08ACCT", {{OP_TOUR_NEW}, {OP_SAVE}, {OP_GOTO_VAR, 1}}},
+    {0x08, "B08CNCL", {{OP_GOTO_VAR, 1}}},
+    {0x08, "B08ALLT", {{OP_TOUR_PICK, 0, -1}}},
+    {0x08, "B08ALRT", {{OP_TOUR_PICK, 0, 1}}},
+    {0x08, "B08PREV", {{OP_TOUR_PICK, 1, -1}}},
+    {0x08, "B08NEXT", {{OP_TOUR_PICK, 1, 1}}},
+    {0x02, "B02BARR", {{OP_ANIM, 2, 3}, {OP_SETVAR, 1, 2}, {OP_GOTO, 0x03}}},
+    {0x02, "B02TTDC", {{OP_ANIM, 3, 3}, {OP_GOTO, 0x04}}},
+    {0x02, "B02CHAR", {{OP_ANIM, 4, 3}, {OP_GOTO, 0x01}}},
+    {0x09, "B09BARR", {{OP_ANIM, 4, 3}, {OP_SETVAR, 1, 9}, {OP_GOTO, 0x03}}},
+    {0x09, "B09TTDC", {{OP_ANIM, 1, 4}, {OP_ANIM, 2, 3}, {OP_GOTO, 0x04}}},
+    {0x09, "B09CHAR", {{OP_ANIM, 3, 3}, {OP_GOTO, 0x01}}},
+    {0x04, "B04ACCT", {{OP_TOUR_TYPE}, {OP_TOUR_GEN}, {OP_GOTO, 0x05}}},
+    {0x04, "B04EXIT", {{OP_TOUR_ROUTE, 2, 9, -1}}},
 };
 
 struct front {
     hg_archive *a;
+    debrief_in  result;         /* the sim's objectives, kills and deaths for the debriefing (hgmsn.cfg / HGCAR) */
     shell      *sh;
     career      k;
     char        path[1100];
@@ -125,6 +207,7 @@ struct front {
     int         under;          /* the state under a popup state (0x13 over 0x14, a pushed one) */
     int         stack[8], nstack;
     int         request;
+    mps        *mp;             /* the multiplayer screens' session (src/mpscreens.h), made on first use */
     int         success;        /* the last mission's outcome */
     char        scenario[16];
     squad       sq;             /* the wingmen the launch takes (src/squad.h) */
@@ -145,6 +228,7 @@ struct front {
     int         g_mouse;               /* the mouse button is held on the view (+0x9e) */
     int         key_left, key_right;   /* the arrow keys held (GetKeyboardState, FUN_100f1516) */
     char        b_gear[32];            /* the gear the briefing's view shows */
+    int         b_dark, b_nolaunch;    /* its tech over the game's level; the launch disabled (0x100fcb39) */
     float       b_turn;                /* its turn about y, degrees */
     char        movie[16];
     const action *pending;      /* actions waiting for a mode-3 animation (FUN_1003236d) */
@@ -159,6 +243,15 @@ struct front {
     int         narr_on, narr_part;
     uint64_t    now, narr_start;
     int         nlist_game;
+    int         training;
+    int         t_faction, t_unit;   /* B08's spinners */
+    int         t_types[16], t_ntypes, t_sel;   /* B04's mission types */
+    rmg         t_rmg;          /* the last generated mission */
+    int         t_ok;       /* the launch is training's (string 2's scenario, no squad, no career update) */
+    shell_barracks bar;          /* the barracks' contents (src/barracks.h) */
+    options     opt;             /* hgdif.cfg / hgsnd.cfg (src/options.h) */
+    char        dir[1100];       /* the game folder */
+    uint64_t    credits_t0;
 };
 
 /* the gear editor's 3D view (0x101e175a) */
@@ -169,7 +262,7 @@ struct front {
 
 static int is_popup(int state)
 {
-    return state == 0x13 || state == 0x48;
+    return state == 0x13 || state == 0x48 || state == 0x3f || state == 0x15 || state == 0x31;   /* B21 / B49: SHP popups */
 }
 
 static const char *screen_of(int state)
@@ -209,6 +302,22 @@ static void fill_missions(front *f)
     shell_list_set(f->sh, "B20MLIST", items, n, sel);
 }
 
+/* B01's info boxes (FUN_100ebab2 -> FUN_100ebbde, on the game list's selection; FUN_101398eb's FUN_100140a7 boxes
+ * 0x1d / 0x1f / 0x21 / 0x24, their inner rectangles, font 9, 0xfe): missions (stat 3), kills (stat 6), the rank's
+ * name (0x10254808 + stat 2 x 0x10), the allegiance (FUN_10111766: "North" 0x10254d60 / "South" 0x10254778); empty
+ * with no game selected */
+static void b01_info(front *f)
+{
+    int g = shell_list_selected(f->sh, "B01CLIST");
+    const career_char *c = g >= 0 && g < f->nlist_game ? &f->k.c[f->list_game[g]] : NULL;
+    char m[16], k[16];
+    if (c) { snprintf(m, sizeof m, "%d", c->stat[3]); snprintf(k, sizeof k, "%d", c->stat[6]); }
+    shell_tbox_set(f->sh, 0, 314, 135, 410, 158, c ? m : "");
+    shell_tbox_set(f->sh, 1, 430, 135, 526, 158, c ? k : "");
+    shell_tbox_set(f->sh, 2, 314, 74, 521, 96, c ? barracks_rank_name(c->stat[CAREER_RANK]) : "");
+    shell_tbox_set(f->sh, 3, 353, 187, 457, 206, c ? (tour_faction(c->type) == 1 ? "North" : "South") : "");
+}
+
 static void fill_games(front *f)
 {
     const char *items[64];
@@ -220,6 +329,11 @@ static void fill_games(front *f)
         items[n++] = f->k.c[i].name;
     }
     f->nlist_game = n;
+    if (f->state == 0x01) {
+        shell_list_set(f->sh, "B01CLIST", items, n, sel);
+        b01_info(f);
+        return;
+    }
     shell_list_set(f->sh, "B20CLIST", items, n, sel);
     fill_missions(f);
 }
@@ -242,13 +356,14 @@ static int load_wave(front *f, const char *name, hg_wave *w)
 {
     size_t len;
     uint8_t *d = hga_load(f->a, name, "WAV", &len, NULL);
-    int r = d ? wave_parse(d, len, w) : -1;
+    /* FUN_1003293b / FUN_10032bb2: a 22,050 Hz 8-bit mono buffer holding the whole record, header included */
+    int r = d ? wave_raw8(d, len, 22050, w) : -1;
     free(d);
     return r;
 }
 
-/* FUN_1003293b: the sound looped at -15 dB (DirectSound volume -1500); the original's buffer holds the whole file,
- * header included, the port plays the data */
+/* FUN_1003293b: the sound looped at -15 dB (DirectSound volume -1500); the buffer holds the whole file, header
+ * included, so its 44 header bytes play (a click) at every pass */
 static void play_loop(front *f, int idx)
 {
     if (idx == -1 || idx == f->loop_cur) return;
@@ -331,11 +446,86 @@ static void garage_controls(front *f);
 static int same_name(const char *g, const char *n);
 static void garage_load(front *f);
 static void garage_save(front *f);
+static void run(front *f, const action *act);
 static void garage_drop(front *f, int id, int x, int y);
 static void fill_gears(front *f);
 
+/* B20's accept and delete (FUN_10149529's actions 6 / 7, event 0x21, FUN_10017c1d): disabled (+0x48) while the game
+ * list has no selection (FUN_10002110 -1), enabled (+0x4c) otherwise */
+static void b20_controls(front *f)
+{
+    int none = shell_list_selected(f->sh, "B20CLIST") < 0;
+    shell_disable(f->sh, "B20ACCT", none);
+    shell_disable(f->sh, "B20DEL_", none);
+}
+
+/* B16's list (FUN_10147d38): campaign entries 0x23 .. 0x26 by their titles (0x101ace60 + entry x 0x7f + 0x1b), the
+ * first selected on building (vtable +0x60(0)); its events 0x13 / 8 (the arrows): var 0x1a = the item's entry
+ * (FUN_100181c5), the briefing of var 0x1a loaded into the summary box (FUN_100ff9d0), the narration stopped
+ * (FUN_100ffab5) */
+static void training_select(front *f)
+{
+    int i = shell_list_selected(f->sh, "B16_LIST");
+    if (i < 0) return;
+    f->var[0x1a] = 0x23 + i;
+    if (f->narr_on) narration_stop(f);
+    shell_set_mission(f->sh, f->var[0x1a]);
+}
+
+static void training_fill(front *f)
+{
+    const char *items[4];
+    for (int i = 0; i < 4; i++) items[i] = shell_campaign[0x23 + i].title;
+    shell_list_set(f->sh, "B16_LIST", items, 4, 0);
+    training_select(f);
+}
+
+/* the save header's last selections (FUN_10136c8c / FUN_10136e50: the game's place in the list, kept per class: the
+ * header's first word tour of duty, second multiplayer, third the story) */
+static int last_slot(int cls)
+{
+    return cls == 0 ? 2 : cls == 1 ? 0 : 1;
+}
+
+static void set_cur(front *f, int i)
+{
+    f->cur = i;
+    if (i >= 0 && i < f->k.count) f->k.last[last_slot(career_class(f->k.c[i].type))] = i;
+}
+
+/* leaving the main menu (FUN_101391b8's screen event 1, FUN_100eabb6 -> FUN_10136f6d): the current game becomes the
+ * last one selected of the class var 0x29 names; FUN_10136e50 walks the list that many places, so -1 (none yet)
+ * lands on the first game, and a place past the end leaves the current game as it is */
+static void last_game(front *f)
+{
+    int c = f->var[0x29], i = f->k.last[last_slot(c < 0 || c > 2 ? 0 : c)];
+    if (i < 0) i = 0;
+    if (i < f->k.count) f->cur = i;
+}
+
+static void spinners_show(front *f)
+{
+    for (int k = 0; k < OPT_COUNT; k++) {
+        const char *const *t;
+        int n = options_items(k, &t);
+        shell_set_spinner(f->sh, options_stem(k), t[f->opt.sel[k] % n]);
+    }
+}
+
+/* the credits' lines (0x101c7b60: 0x78-byte lines up to one starting with '|'), joined by "\n" */
+static const char *credits_text(void);
+
+static void tour_run_gen(front *f);
+static void tour_types(front *f);
+static void tour_b08(front *f);
+
+static int mp_state(int st) { return st == 0x15 || st == 0x24 || st == 0x31 || st == 0x2e || st == 0x2f || st == 0x27; }
+
 static void enter(front *f, int state)
 {
+    if (state == 0x3a) state = 0x24;   /* B58 (FUN_1015e872): the session layer opened, then B36 */
+    if (mp_state(state) && !f->mp)
+        f->mp = mps_open(f->a, f->cur >= 0 && f->cur < f->k.count ? f->k.c[f->cur].name : "Player");
     if (f->narr_on) narration_stop(f);
     if (!is_popup(state)) play_loop(f, screen_sound(state == 0x0e ? f->var[2] : state));
     if (is_popup(state)) {
@@ -347,6 +537,7 @@ static void enter(front *f, int state)
          * 16 characters (FUN_101490b5); B72's text at (28, 20) in the popup at (192, 152), 193 x 90 (FUN_1016aae2) */
         if (state == 0x13) shell_edit_set(f->sh, 159 + 72, 163 + 53, 159 + 72 + 173, 163 + 53 + 22, 0x10, "");
         if (state == 0x48) shell_box_set(f->sh, 192 + 28, 152 + 20, 192 + 28 + 193, 152 + 20 + 90, f->str[0x13]);
+        if (mp_state(state)) mps_enter(f->mp, f->sh, state);
         return;
     }
     if (state == 0x0e) {
@@ -365,13 +556,46 @@ static void enter(front *f, int state)
     }
     f->state = state;
     if (shell_goto(f->sh, screen_of(state))) { fprintf(stderr, "no screen for state 0x%x\n", state); return; }
-    if (state == 0x14) fill_games(f);
+    if (state == 0x14) { fill_games(f); b20_controls(f); }
+    if (mp_state(state)) mps_enter(f->mp, f->sh, state);
+    if (state == 0x01) fill_games(f);
+    if (state == 0x08) {
+        /* B08: the name (FUN_1000fe8f in B08_TEXT's place), the allegiance and the unit */
+        /* FUN_10145504: the entry (FUN_10013137) at (72, 43), 173 x 22, 15 characters; the allegiance spinner
+         * (FUN_100edc85 -> FUN_100edcdd, var 0x29 non-zero: North (1), South (0)) starts on North, the unit spinner
+         * (FUN_100edd82 -> FUN_100edde3) on its faction's default */
+        shell_edit_set(f->sh, 72, 43, 72 + 173, 43 + 22, 0xf, "");
+        f->t_faction = 1;
+        f->t_unit = tour_units(f->t_faction, NULL);
+        tour_b08(f);
+    }
+    if (state == 0x04) {
+        /* B04 on entering: var 0x16 = 0, var 0x1a = 0x22 (the random mission), the list filled (0x100fcfcf) and
+         * the generator run for its first entry */
+        f->var[0x16] = 0;
+        f->var[0x1a] = 0x22;
+        tour_types(f);
+        if (f->t_ntypes > 0) { f->var[0x17] = f->t_types[0]; tour_run_gen(f); f->t_sel = 0; }
+    }
+    if (state == 0x10) training_fill(f);
+    if (state == 0x40) spinners_show(f);
+    if (state == 0x43) { f->credits_t0 = f->now; shell_set_credits(f->sh, credits_text(), 0); }
+    if (state == 0x03) {
+        /* the barracks (FUN_1013ae22): its controls filled from the current game on entering */
+        barracks_build(f->cur >= 0 && f->cur < f->k.count ? &f->k.c[f->cur] : NULL, &f->bar);
+        shell_set_barracks(f->sh, &f->bar);
+    }
+    if (state == 0x11) shell_set_mission(f->sh, f->var[0x1a]);   /* B17: the mission's debriefing */
     /* the debriefing's continue and abort share a place: continue after a success or outside the story, abort after
      * a story mission failed (FUN_100e2386) */
     if (state == 0x06) shell_hide(f->sh, game_class(f) != 0 || f->success ? "B06ABRT" : "B06CONT");
     if (state == 0x05 || state == 0x3e || state == 0x06) {
-        /* the briefing loaded for var 0x1a (FUN_100ffc4d at B20's accept, FUN_100e7fe4 after the debriefing) */
-        shell_set_mission(f->sh, f->var[0x1a]);
+        /* the briefing loaded for var 0x1a (FUN_100ffc4d at B20's accept, FUN_100e7fe4 after the debriefing); the
+         * random mission's is the generator's (it fills the game's briefing, 0x1012e5dc) */
+        if (f->var[0x1a] == 0x22 && f->t_ok) shell_set_brf(f->sh, 0x22, &f->t_rmg.brf);
+        else shell_set_mission(f->sh, f->var[0x1a]);
+        /* the map's front line: the game's own outside the story (FUN_10112881) */
+        shell_set_front(f->sh, f->var[0x1a] == 0x22 && f->cur >= 0 && game_class(f) == 1 ? f->k.c[f->cur].front : NULL);
     }
     /* the squad panel (0x100ef574 on entering, again only when the game or the mask changed): the wingmen */
     if (state == 0x05) front_squad_update(f);
@@ -409,6 +633,14 @@ static void pop(front *f)
         f->g_pick = -1;
         if (!design_build(&f->g_des, f->a)) garage_refresh(f);
     }
+    /* B07 back from accept's question (FUN_10016b10: var 0x2b 1 and the answer var 0x2a 1): accept's chain,
+     * 0x100fc12d / 0x100fb6b8 / 0x100f15cf / 0x100f0871 (the save and the game's gear) and var 1's state */
+    if (was == 0x48 && f->state == 0x07 && f->var[0x2b] == 1 && f->var[0x2a] == 1) {
+        static const action yes[2] = {{OP_GARAGE_KEEP}, {OP_GOTO_VAR, 1}};
+        action a[3] = {yes[0], yes[1], {OP_END}};
+        run(f, a);
+        return;
+    }
     /* B20 back from its confirmation: delete the selected game when accepted */
     if (was == 0x48 && f->state == 0x14 && f->var[0x2a] == 1) {
         int g = shell_list_selected(f->sh, "B20CLIST");
@@ -421,6 +653,50 @@ static void pop(front *f)
         }
         fill_games(f);
     }
+}
+
+/* B04 (FUN_1013b3e7): the list's mission types (0x100fcfcf), their names (0x10254d80); the generator runs for the
+ * selected one (FUN_1010900f's actions on a change: var 0x17, 0x100fcc3f, the summary FUN_100e9290) */
+static void tour_run_gen(front *f)
+{
+    career_char *c = f->cur >= 0 && f->cur < f->k.count ? &f->k.c[f->cur] : NULL;
+    f->t_ok = 0;
+    if (!c) return;
+    int level = squad_tech_level(c->type, c->stat[0], c->a8c[tour_faction(c->type) == 1 ? 2 : 6], c->stat[7]);
+    int alone = 0;
+    f->t_ok = tour_generate(f->a, c, level, f->var[0x15], f->var[0x16], f->var[0x17], &f->t_rmg, &alone);
+    if (!f->t_ok) { fprintf(stderr, "tour: the mission generator failed (type %d)\n", f->var[0x17]); return; }
+    /* 0x100fcc3f's results: string var 2 the scenario, string var 3 the type's name, var 0x19 the region, stats
+     * 14 / 15 the region and local_24 */
+    snprintf(f->str[2], sizeof f->str[2], "%s", f->t_rmg.scenario);
+    snprintf(f->str[3], sizeof f->str[3], "%s", f->t_rmg.movie >= 0 ? rmg_type_name(f->t_rmg.movie) : "");
+    f->var[0x19] = f->t_rmg.region;
+    c->stat[14] = f->t_rmg.region;
+    c->stat[15] = alone;
+}
+
+static void tour_types(front *f)
+{
+    career_char *c = f->cur >= 0 && f->cur < f->k.count ? &f->k.c[f->cur] : NULL;
+    const char *items[16];
+    f->t_ntypes = 0;
+    if (c) {
+        int level = squad_tech_level(c->type, c->stat[0], c->a8c[tour_faction(c->type) == 1 ? 2 : 6], c->stat[7]);
+        f->t_ntypes = tour_mission_types(c, level, f->t_types);
+    }
+    for (int i = 0; i < f->t_ntypes; i++) items[i] = rmg_type_name(f->t_types[i]);
+    f->t_sel = -1;
+    shell_list_set(f->sh, "B04_LIST", items, f->t_ntypes, 0);
+}
+
+static void tour_b08(front *f)
+{
+    static char line[64];
+    snprintf(line, sizeof line, "%s", f->t_faction == 1 ? "North" : "South");
+    const char *items[1] = {line};
+    shell_list_set(f->sh, "B08ALLEG", items, 1, 0);
+    const char *u[1] = {barracks_unit_name(f->t_unit)};
+    shell_list_set(f->sh, "B08ULIST", u, 1, 0);
 }
 
 static void run(front *f, const action *act)
@@ -440,7 +716,11 @@ static void run(front *f, const action *act)
                 return;
             }
             break;
-        case OP_GOTO: if (is_popup(f->state)) shell_popup_close(f->sh); enter(f, x->a); break;
+        case OP_GOTO:
+            if (is_popup(f->state)) shell_popup_close(f->sh);
+            if (f->state == 0x00 && x->a != 0x00) last_game(f);
+            enter(f, x->a);
+            break;
         case OP_GOTO_VAR: enter(f, f->var[x->a]); break;
         case OP_SETVAR: f->var[x->a] = x->b; break;
         case OP_SETSTR: snprintf(f->str[x->a], sizeof f->str[x->a], "%s", x->s); break;
@@ -456,7 +736,7 @@ static void run(front *f, const action *act)
         }
         case OP_SELECT_GAME: {
             int g = shell_list_selected(f->sh, "B20CLIST");
-            if (g >= 0 && g < f->nlist_game) f->cur = f->list_game[g];
+            if (g >= 0 && g < f->nlist_game) set_cur(f, f->list_game[g]);
             break;
         }
         case OP_LIST_VAR: {
@@ -468,11 +748,12 @@ static void run(front *f, const action *act)
             const char *name = shell_edit_text(f->sh);
             if (f->var[0x29] == 0 && name[0]) {
                 int i = career_new_story(&f->k, name);
-                if (i >= 0) f->cur = i;
+                if (i >= 0) set_cur(f, i);
             }
             break;
         }
         case OP_SET_MISSION:
+            f->training = 0;
             if (f->cur >= 0) {
                 int m = f->var[x->a];
                 if (m == 0x22) m = f->var[x->b];
@@ -524,6 +805,28 @@ static void run(front *f, const action *act)
                 if (!design_build(&f->g_des, f->a)) garage_refresh(f);
             }
             break;
+        case OP_GARAGE_ACCEPT: {
+            /* the actions 0x100f2585 test the view's top speed (0x100a7346, garage_design_stats) against 5: under,
+             * var 0x2b = 1, the question (0x1023d720) in string var 0x13 and the popup 0x48; else 0x100fc12d,
+             * 0x100fb6b8, 0x100f15cf (the save), 0x100f0871 (the game's gear) and var 1's state (0x10014cdf) */
+            int ids[DESIGN_ITEMS], ar[DESIGN_ITEMS], sp = 0;
+            unsigned op[DESIGN_ITEMS];
+            for (int k = 0; k < f->g_des.nitem; k++) {
+                ids[k] = f->g_des.item[k].id; ar[k] = f->g_des.item[k].armor; op[k] = (unsigned)f->g_des.item[k].options;
+            }
+            garage_design_stats(ids, ar, op, f->g_des.nitem, f->g_des.b30, f->g_des.b31, &sp, NULL, NULL);
+            action a[4] = {{OP_END}, {OP_END}, {OP_END}, {OP_END}};
+            if (sp < 5) {
+                a[0] = (action){OP_SETVAR, 0x2b, 1};
+                a[1] = (action){OP_SETSTR, 0x13, 0, 0, "Are you sure you want to accept this gear with such a low maximum speed?"};
+                a[2] = (action){OP_PUSH, 0x48};
+            } else {
+                a[0] = (action){OP_GARAGE_KEEP};
+                a[1] = (action){OP_GOTO_VAR, 1};
+            }
+            run(f, a);
+            return;
+        }
         case OP_GARAGE_KEEP:
             garage_save(f);
             if (f->ngl > 0) {
@@ -533,6 +836,71 @@ static void run(front *f, const action *act)
                 squad_refresh(f);
             }
             break;
+        case OP_BARRACKS_EXIT:
+            if (f->cur >= 0 && f->cur < f->k.count && f->bar.unit_sel >= 0 && f->bar.unit_sel < f->bar.nunit)
+                f->k.c[f->cur].stat[7] = f->bar.unit[f->bar.unit_sel];
+            break;
+        case OP_OPTIONS:
+            if (x->a == 0) { if (options_save(&f->opt, f->dir)) fprintf(stderr, "could not write the options\n"); }
+            else if (x->a == 1) options_from_blocks(&f->opt);
+            else {
+                /* FUN_100e76b6 -> 0x100e7962: the row of 0x101c5888 for the machine's speed; a fast CPU's (200 and
+                 * up: the row of 198) turns every detail on, the speakers off */
+                static const int on[] = {OPT_PA, OPT_SH, OPT_ML, OPT_OT, OPT_ST, OPT_TF};
+                for (size_t i = 0; i < sizeof on / sizeof on[0]; i++) f->opt.sel[on[i]] = 1;
+                f->opt.sel[OPT_DS] = 0;
+            }
+            spinners_show(f);
+            break;
+        case OP_TOUR_ROUTE: {
+            int c = game_class(f), fac = f->cur >= 0 && f->cur < f->k.count ? tour_faction(f->k.c[f->cur].type) : 1;
+            int to = c == 0 ? x->c : c == 1 ? (fac == 1 ? x->a : x->b) : 0x15;   /* multiplayer: B21 (0x10139f9e's d / e) */
+            if (f->var[0x15] == -2) f->var[0x15] = shell_list_selected(f->sh, "B01CLIST");   /* FUN_10016026 */
+            if (to >= 0) enter(f, to);
+            break;
+        }
+        case OP_TOUR_NEW: {
+            const char *name = shell_edit_text(f->sh);
+            if (name[0]) {
+                int i = tour_new_game(&f->k, name, f->t_faction, f->t_unit);
+                if (i >= 0) set_cur(f, i);
+            }
+            break;
+        }
+        case OP_TOUR_PICK:
+            if (x->a == 0) { f->t_faction = !f->t_faction; f->t_unit = tour_units(f->t_faction, NULL); }
+            else {
+                /* the spinner's arrows (0x10012ab6): previous / next among the faction's units, round */
+                int us[8], n = 0, k = 0;
+                tour_units(f->t_faction, us);
+                while (n < 8 && us[n] >= 0) n++;
+                for (int i = 0; i < n; i++) if (us[i] == f->t_unit) k = i;
+                f->t_unit = us[((k + x->b) % n + n) % n];
+            }
+            tour_b08(f);
+            break;
+        case OP_TOUR_TYPE: {
+            int i = shell_list_selected(f->sh, "B04_LIST");
+            if (i >= 0 && i < f->t_ntypes) f->var[0x17] = f->t_types[i];
+            break;
+        }
+        case OP_TOUR_GEN: tour_run_gen(f); break;
+        case OP_MP: {
+            if (!f->mp) f->mp = mps_open(f->a, f->cur >= 0 && f->cur < f->k.count ? f->k.c[f->cur].name : "Player");
+            int to = mps_action(f->mp, f->sh, x->a, x->b, shell_edit_text(f->sh));
+            if (to == -2) f->request = FRONT_LAUNCH;
+            else if (to >= 0) {
+                if (is_popup(f->state)) shell_popup_close(f->sh);
+                enter(f, to);
+            }
+            break;
+        }
+        case OP_TRAIN_SCN: {
+            int m = f->var[0x1a];
+            snprintf(f->str[2], sizeof f->str[2], "%s", m >= 0 && m < SHELL_CAMPAIGN ? shell_campaign[m].scenario : "");
+            f->training = 1;
+            break;
+        }
         case OP_NARRATE:
             if (f->narr_on) narration_stop(f);
             else if (shell_brf(f->sh)) { f->narr_on = 1; f->narr_part = -1; f->narr_start = f->now; narration_tick(f); }
@@ -548,6 +916,8 @@ front *front_open(hg_archive *a, const char *game_dir)
     f->a = a;
     f->sh = shell_open(a);
     snprintf(f->path, sizeof f->path, "%s/CHARINFO.HG1", game_dir);
+    snprintf(f->dir, sizeof f->dir, "%s", game_dir);
+    options_load(&f->opt, game_dir);
     if (career_load(&f->k, f->path)) fprintf(stderr, "%s: unreadable, starting without games\n", f->path);
     f->cur = -1;
     for (int i = 0; i < f->k.count; i++) if (career_class(f->k.c[i].type) == 0) { f->cur = i; break; }
@@ -568,6 +938,12 @@ void front_keys(front *f, int left, int right)
 void front_tick(front *f, uint64_t ms)
 {
     f->now = ms;
+    if (f->mp && mp_state(f->state)) {
+        int to = mps_tick(f->mp, f->sh, f->state);
+        if (to == -2) f->request = FRONT_LAUNCH;
+        else if (to >= 0) enter(f, to);
+    }
+    if (f->state == 0x43) shell_set_credits(f->sh, credits_text(), (int)((ms - f->credits_t0) / 20) * 2);
     /* the gear editor's idle actions 0xe / 0xf (FUN_1013fa9f -> FUN_100f1516, run on every pass of the shell's loop,
      * message 0x20): while Right / Left is held, the design turns 7 / -7 degrees about y (0x100bf3e0 -> 0x1011d6eb ->
      * 0x1004a555), unless an item is dragged over the view (+0x9e) or the view is empty (+0x7e). So the speed is the
@@ -577,9 +953,20 @@ void front_tick(front *f, uint64_t ms)
         f->b_turn += 7.0f;
         shell_briefing_gear_turn(f->sh, f->b_turn);
     }
+    shell_garage_spin(f->sh, f->state == 0x07, f->g_ids, f->g_n, f->g_drag, ms);
     if (f->state == 0x07 && !f->g_mouse && f->g_des.gdf && (f->key_right || f->key_left)) {
         f->g_turn += (f->key_right ? 7.0f : 0.0f) - (f->key_left ? 7.0f : 0.0f);
         garage_view(f);
+    }
+    if (f->state == 0x04) {
+        /* B04's selection change (FUN_1010900f): var 0x17, the generator, the summary */
+        int i = shell_list_selected(f->sh, "B04_LIST");
+        if (i >= 0 && i != f->t_sel && i < f->t_ntypes) {
+            f->t_sel = i;
+            f->var[0x17] = f->t_types[i];
+            tour_run_gen(f);
+            if (f->t_ok) shell_set_brf(f->sh, 0x22, &f->t_rmg.brf);
+        }
     }
     narration_tick(f);
     shell_anim_tick(f->sh, ms);
@@ -600,9 +987,19 @@ void front_sound_pause(front *f)
     f->loop_voice = 0;
 }
 
+net *front_net(front *f) { return f && f->mp ? mps_net(f->mp) : NULL; }
+
+void front_mp_over(front *f, const char *results)
+{
+    if (!f || !f->mp) return;
+    mps_over(f->mp, results);
+    enter(f, 0x27);   /* B39, the multiplayer debriefing */
+}
+
 void front_close(front *f)
 {
     if (!f) return;
+    mps_close(f->mp);
     front_sound_pause(f);
     design_free(&f->g_des);
     for (int i = 0; i < 7; i++) wave_free(&f->loop_wave[i]);
@@ -615,6 +1012,8 @@ void front_mouse(front *f, int x, int y, int down)
 {
     if (f->pending) return;     /* the shell plays the animation; clicks wait */
     const char *b = shell_mouse(f->sh, x, y, down);
+    if (f->state == 0x14) b20_controls(f);   /* after every event (event 0x21) */
+    if (f->state == 0x01) b01_info(f);       /* FUN_100ebbde: the boxes follow the list's selection */
     /* the situation screen: a click anywhere returns to the state in var 1 */
     if (f->state == 0x3e && !down && !b) { enter(f, f->var[1]); return; }
     if (f->state == 0x07) {
@@ -650,9 +1049,28 @@ void front_mouse(front *f, int x, int y, int down)
     char stem[16];
     snprintf(stem, sizeof stem, "%s", b);
     if (f->state == 0x14) {
-        /* B20: the game list's arrows show the selected game's missions; accept and delete need a selected game */
+        /* B20: the game list's arrows show the selected game's missions */
         if (!strcmp(stem, "B20_UP_") || !strcmp(stem, "B20DOWN")) fill_missions(f);
-        if ((!strcmp(stem, "B20ACCT") || !strcmp(stem, "B20DEL_")) && shell_list_selected(f->sh, "B20CLIST") < 0) return;
+    }
+    if (f->state == 0x10 && (!strcmp(stem, "B16_UP_") || !strcmp(stem, "B16_DN_"))) training_select(f);
+    if (f->state == 0x40) {
+        /* the spinners' arrows (0x10012ab6: previous / next, round) */
+        for (int k = 0; k < OPT_COUNT; k++) {
+            char l[16], r[16];
+            snprintf(l, sizeof l, "%sLT", options_stem(k));
+            snprintf(r, sizeof r, "%sRT", options_stem(k));
+            if (strcmp(stem, l) && strcmp(stem, r)) continue;
+            const char *const *t;
+            int n = options_items(k, &t), d = !strcmp(stem, l) ? -1 : 1;
+            f->opt.sel[k] = ((f->opt.sel[k] + d) % n + n) % n;
+            spinners_show(f);
+        }
+    }
+    if (f->state == 0x03 && f->bar.nunit > 0 && (!strcmp(stem, "B03PREV") || !strcmp(stem, "B03NEXT"))) {
+        /* the unit list's arrows (0x10012ab6: previous / next, round) */
+        int n = f->bar.nunit, d = !strcmp(stem, "B03PREV") ? -1 : 1;
+        f->bar.unit_sel = ((f->bar.unit_sel + d) % n + n) % n;
+        shell_set_barracks(f->sh, &f->bar);
     }
     for (size_t i = 0; i < sizeof buttons / sizeof buttons[0]; i++)
         if (buttons[i].state == f->state && !strcmp(buttons[i].stem, stem)) { run(f, buttons[i].act); return; }
@@ -660,7 +1078,22 @@ void front_mouse(front *f, int x, int y, int down)
 
 void front_key(front *f, int vk)
 {
+    if (vk == 0x1b) {
+        /* Esc (the shell's loop, 0x101735b0 -> the table at 0x10173bbb): states 8, 0x13, 0x40 .. 0x43 ignore it,
+         * the options popup (0x3f) goes back to var 3, any other state opens it (var 3 = the state) */
+        int st = f->state;
+        if (st == 0x3f) { pop(f); return; }
+        if (st == 8 || st == 0x13 || (st >= 0x40 && st <= 0x43) || is_popup(st) || f->pending) return;
+        f->var[3] = st;
+        enter(f, 0x3f);
+        return;
+    }
+    if (vk == 0x0d && f->mp && (f->state == 0x24 || f->state == 0x2e || f->state == 0x2f)) {   /* chat: the entry sent */
+        mps_action(f->mp, f->sh, 14, 0, shell_edit_text(f->sh));
+        return;
+    }
     shell_key(f->sh, vk);
+    if (f->state == 0x14) b20_controls(f);
 }
 
 void front_char(front *f, int ch)
@@ -672,6 +1105,18 @@ int front_poll(front *f)
 {
     int r = f->request;
     f->request = FRONT_RUN;
+    if (r == FRONT_LAUNCH && f->mp && mps_net(f->mp)) {   /* a multiplayer game: the generated mission */
+        snprintf(f->scenario, sizeof f->scenario, "%.15s", mps_scenario(f->mp));
+        return r;
+    }
+    if (r == FRONT_LAUNCH && f->training) {
+        snprintf(f->scenario, sizeof f->scenario, "%.15s", f->str[2][0] ? f->str[2] : "M33_SCN1");
+        return r;
+    }
+    if (r == FRONT_LAUNCH && f->var[0x1a] == 0x22 && game_class(f) == 1 && f->t_ok) {
+        snprintf(f->scenario, sizeof f->scenario, "%.15s", f->t_rmg.scenario);   /* string var 2 */
+        return r;
+    }
     if (r == FRONT_LAUNCH) {
         /* the scenario of the game's mission (stat 12), or of var 0x1a without a game */
         int m = f->cur >= 0 ? f->k.c[f->cur].stat[CAREER_MISSION] : f->var[0x1a];
@@ -724,6 +1169,8 @@ static void squad_refresh(front *f)
         gear_base(f->pgear, sizeof f->pgear, f->gl[f->pgsel]);
         if (strcmp(f->b_gear, f->pgear)) { snprintf(f->b_gear, sizeof f->b_gear, "%s", f->pgear); briefing_gear(f); }
     }
+    shell_briefing_gear_dark(f->sh, f->b_dark);
+    shell_disable(f->sh, "B05LNCH", f->ngl <= 0 || f->b_nolaunch);
     const char *gp = f->ngl > 0 ? f->gl_disp[f->pgsel] : "";
     shell_set_squad(f->sh, squad_pilot_name(north, f->sq.pilot[0]), squad_portrait(north, 0, f->sq.pilot[0]),
                     f->sq.pilot[0] >= 0 && f->ngl ? f->gl_disp[f->gsel[0]] : "",
@@ -853,6 +1300,9 @@ static void garage_controls(front *f)
     shell_disable(f->sh, "B07DETL", !(sel && model == 1));
     shell_disable(f->sh, "B07DEL_", !sel);
     shell_disable(f->sh, "B07CLR_", empty);
+    career_char *c = f->cur >= 0 && f->cur < f->k.count ? &f->k.c[f->cur] : NULL;
+    garage_panel(f->sh, &f->g_des, sel ? f->g_pick : -1,
+                 c ? squad_tech_level(c->type, c->stat[0], c->a8c[f->sq_north ? 2 : 6], c->stat[7]) : 0);
 }
 
 /* the view's root object: the design's root item (a torso or a strider), placed at its view place (FUN_100bec8a:
@@ -877,6 +1327,8 @@ static void briefing_gear(front *f)
     if (!f->pgear[0] || design_load(&pd, f->a, f->pgear) || design_build(&pd, f->a)) {
         design_free(&pd);
         shell_set_briefing_gear(f->sh, NULL, 0, NULL, NULL, NULL, 0);
+        f->b_dark = 0;
+        f->b_nolaunch = f->ngl <= 0;   /* 0x100fcb39 */
         return;
     }
     static char extra[96][9];
@@ -897,6 +1349,16 @@ static void briefing_gear(front *f)
         }
     }
     shell_set_briefing_gear(f->sh, pd.gdf, pd.len, (const char (*)[9])extra, place, weap, nw);
+    /* the view's tech (+0xb8, 0x1005bb6d at its load 0x1008f81d) over the game's level (+0xbc, FUN_1008f4c3): drawn
+     * dark under the priority message (FUN_1008f502); B05's action 0x100fcb39 enables the launch only while the
+     * player's list's entry is within the level (0x1009abd5: -1 with none) */
+    {
+        career_char *c = f->cur >= 0 && f->cur < f->k.count ? &f->k.c[f->cur] : NULL;
+        int level = c ? squad_tech_level(c->type, c->stat[0], c->a8c[f->sq_north ? 2 : 6], c->stat[7]) : 0, side;
+        int tech = squad_gear_info(pd.gdf, pd.len, &side, NULL, 0);
+        f->b_dark = tech > level;
+        f->b_nolaunch = f->ngl <= 0 || tech < 0 || tech > level;
+    }
     f->b_turn = 180.0f;
     design_free(&pd);
 }
@@ -924,6 +1386,7 @@ static void garage_refresh(front *f)
     view_of(&f->g_des, extra, place);
     shell_set_garage(f->sh, cat_stem[f->g_cat], items + f->g_top, n - f->g_top, f->ngl > 0 ? f->gl_disp[f->g_sel] : "",
                      f->g_des.gdf, f->g_des.len, (const char (*)[9])extra);
+    shell_garage_ids(f->sh, f->g_ids + f->g_top, n - f->g_top);
     garage_view(f);
 }
 
@@ -956,11 +1419,15 @@ void front_squad_update(front *f)
 
 const char *front_player_gear(const front *f)
 {
+    if (f->training) return NULL;   /* the mission's own player record */
     return f->pgear;
 }
 
 const squad *front_squad(const front *f)
 {
+    /* training: no USERSTAR is written (the scenarios don't include it), so no wingmen */
+    static const squad none = {{SQUAD_NONE1, SQUAD_NONE2}, {0, 0}, {"", ""}};
+    if (f->training) return &none;
     return &f->sq;
 }
 
@@ -978,11 +1445,38 @@ void front_mission_over(front *f, int success)
 {
     shell_set_outcome(f->sh, success ? 2 : 1);
     f->success = success;
-    if (success && f->cur >= 0 && game_class(f) == 0) {
+    /* the career's update (0x100df8e4) is B06's and B39's action (FUN_100df883), not B17's: training changes nothing */
+    if (!f->training && f->cur >= 0 && game_class(f) == 0) {
+        /* HGSHELL 0x100df8e4 (the debriefing): stat 11 = stat 12; on the story's success (HGCAR +0x10 == 2) the
+         * reached mission (stat 10) goes up when it was the one played and below 0x20, then the current (stat 12)
+         * goes up while it is below the reached; then the score (src/debrief.h) and the save (0x101373bf) */
         career_char *c = &f->k.c[f->cur];
-        if (c->stat[CAREER_MISSION] < 32) c->stat[CAREER_MISSION]++;
-        if (c->stat[CAREER_REACHED] < c->stat[CAREER_MISSION]) c->stat[CAREER_REACHED] = c->stat[CAREER_MISSION];
+        int reached = c->stat[CAREER_REACHED];
+        c->stat[11] = c->stat[CAREER_MISSION];
+        int first = reached == c->stat[11];
+        if (success) {
+            if (first && reached < 0x20) c->stat[CAREER_REACHED] = reached + 1;
+            if (c->stat[CAREER_MISSION] < c->stat[CAREER_REACHED]) c->stat[CAREER_MISSION]++;
+        }
+        int r10 = c->stat[CAREER_REACHED];
+        c->stat[CAREER_REACHED] = reached;   /* the scoring reads bVar7, taken before the move */
+        debrief_list l;
+        debrief_score(c, 0, success ? 2 : 1, &f->result, &l);
+        c->stat[CAREER_REACHED] = r10;
+        shell_set_score(f->sh, &l);
         save(f);
+    } else if (!f->training && f->cur >= 0 && game_class(f) == 1) {
+        /* the tour of duty's case of 0x100df8e4: stat 11 = stat 12 (the mission type played), then its scoring */
+        career_char *c = &f->k.c[f->cur];
+        c->stat[11] = c->stat[CAREER_MISSION];
+        debrief_list l;
+        debrief_score(c, 1, success ? 2 : 1, &f->result, &l);
+        shell_set_score(f->sh, &l);
+        save(f);
+    } else {
+        debrief_list l;
+        debrief_score(NULL, game_class(f), success ? 2 : 1, &f->result, &l);
+        shell_set_score(f->sh, &l);
     }
     enter(f, f->var[0] ? f->var[0] : 0x05);
 }
@@ -1007,7 +1501,24 @@ void front_mission_stats(front *f, const char *text)
     shell_set_stats(f->sh, text);
 }
 
+void front_mission_result(front *f, const debrief_in *in)
+{
+    if (in) f->result = *in;
+    else memset(&f->result, 0, sizeof f->result);
+}
+
 void front_mission_objectives(front *f, const char *text)
 {
     shell_set_objectives(f->sh, text);
+}
+
+const options *front_options(const front *f)
+{
+    return &f->opt;
+}
+
+#include "credits.h"
+static const char *credits_text(void)
+{
+    return hg_credits;
 }

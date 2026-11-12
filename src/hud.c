@@ -23,9 +23,44 @@ static const char *const radar_names[] = { "HRHFRGPN", "HRHENGPN", "HRHNEGPN", "
                                            "HRHFRGPT", "HRHENGPT", "HRHNEGPT", "HRHNAVPT" };
 enum { R_COUNT = 9 };
 
+/* the window table (0x1010b800, 30 x 0x14 bytes per set: a pointer, then x0, y0, x1, y1 of the 320 x 200 layout)
+ * and the hot spots (0x1010c160, 16.16 fractions of the window's size), sets 2 (North) and 3 (South) of the high
+ * resolution, the one the port's 640 x 480 sim screen picks (0x100966ba: the nearest of 319 x 199, 639 x 479,
+ * 1023 x 767; set = faction + resolution x 2, 0x10020d48) */
+static const short win_tab[2][30][4] = {
+    {{22, 9, 99, 69}, {259, 0, 319, 55}, {258, 145, 309, 179}, {261, 56, 317, 66}, {261, 68, 317, 78},
+     {261, 80, 317, 90}, {261, 92, 317, 102}, {261, 104, 317, 114}, {261, 116, 317, 126}, {261, 128, 317, 138},
+     {261, 140, 317, 150}, {25, 145, 52, 35}, {10, 183, 70, 199}, {10, 100, 260, 199}, {122, 0, 258, 97},
+     {122, 13, 258, 69}, {30, 70, 300, 170}, {145, 190, 280, 199}, {0, 1, 35, 101}, {0, 188, 273, 199},
+     {5, 185, 84, 199}, {0, 136, 177, 188}, {0, 95, 61, 129}, {0, 74, 80, 84}, {13, 0, 116, 92},
+     {10, 136, 70, 145}, {0, 0, 20, 20}, {0, 145, 122, 179}, {0, 145, 183, 179}, {0, 145, 244, 179}},
+    {{218, 9, 295, 69}, {0, 0, 60, 55}, {258, 145, 309, 179}, {2, 56, 58, 66}, {2, 68, 58, 78},
+     {2, 80, 58, 90}, {2, 92, 58, 102}, {2, 104, 58, 114}, {2, 116, 58, 126}, {2, 128, 58, 138},
+     {2, 140, 58, 150}, {25, 145, 52, 35}, {10, 183, 70, 199}, {10, 100, 260, 199}, {60, 0, 193, 97},
+     {60, 15, 193, 71}, {30, 70, 300, 180}, {145, 190, 280, 199}, {282, 0, 319, 100}, {0, 188, 273, 199},
+     {5, 185, 84, 199}, {0, 136, 177, 188}, {0, 95, 61, 129}, {0, 74, 80, 84}, {195, 2, 307, 92},
+     {10, 136, 70, 145}, {0, 0, 20, 20}, {0, 145, 122, 179}, {0, 145, 183, 179}, {0, 145, 244, 179}},
+};
+static const unsigned short hot_tab[2][30][2] = {
+    {{0, 0}, {0x3d71, 0xccd}, {0, 0}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666},
+     {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+     {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0x3333, 0x3333}, {0, 0x8000}, {0x3333, 0x4000}, {0, 0},
+     {0x747b, 0x6ccd}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}},
+    {{0, 0}, {0x3333, 0x199a}, {0, 0}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666},
+     {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0x599a, 0x2666}, {0, 0}, {0, 0}, {0, 0}, {0, 0},
+     {0, 0}, {0, 0}, {0, 0}, {0x4ccd, 0}, {0, 0}, {0x3333, 0x3333}, {0, 0x8000}, {0x3333, 0x4000}, {0, 0},
+     {0x8ccd, 0x68f6}, {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}},
+};
+
 struct hud {
+    int      wr[30][4];      /* the windows' rectangles at 640 x 480 (0x1007629f / 0x10075dd0) */
+    int      hot[30][2];     /* their hot spots in pixels from the corner (0x10076149) */
+    int      faction;        /* the player gear's +0x613: 0 North, 1 South */
     hg_shape s[N_SHAPES];
     hg_shape radar[R_COUNT];
+    hg_shape bar;            /* HMESSBAR, the message bar (0x1011cf3c; HLESSBAR at low resolution) */
+    hg_shape esc, slbar, slknb;   /* the escape screen's ESCAPSCR, the sliders' SLIDEBAR / SLIDEKNB (high resolution) */
+    unsigned esc_cv, slbar_cv, slknb_cv;   /* their canvases (shape_canvas) */
     hg_font  font;          /* SERPDEUS, the high-resolution HUD font (0x1010e2e0 + 0x12) */
     gear     g;
     int      selected;
@@ -33,6 +68,7 @@ struct hud {
     uint8_t  remap[17][256];  /* 0x107c1100: the colour remap tables (0x10053946) */
     int      cx0, cy0, cx1, cy1;   /* the current window's rectangle: drawing is clipped to it */
     const uint8_t *rm;        /* the current remap table, or NULL */
+    int      tpx, tpy;        /* 0x1014cab0 / 4: the target's projection as window 12's draw last left it (0, 0 at first) */
     uint8_t  idx[480][640];
     uint8_t  on[480][640];
 };
@@ -43,6 +79,20 @@ static void load_shape(hg_archive *a, const char *name, hg_shape *s)
     uint8_t *d = hga_load(a, name, "SHP", &len, NULL);
     if (!d || shp_parse(d, len, 0, s)) memset(s, 0, sizeof *s);
     free(d);
+}
+
+/* frame 0's first dword (0x100cf933): its canvas, width - 1 in the high word, height - 1 in the low */
+static unsigned shape_canvas(hg_archive *a, const char *name)
+{
+    size_t len;
+    uint8_t *d = hga_load(a, name, "SHP", &len, NULL);
+    unsigned v = 0;
+    if (d && len >= 16) {
+        size_t o = (size_t)d[8] | (size_t)d[9] << 8 | (size_t)d[10] << 16 | (size_t)d[11] << 24;
+        if (o + 4 <= len) v = (unsigned)d[o] | (unsigned)d[o + 1] << 8 | (unsigned)d[o + 2] << 16 | (unsigned)d[o + 3] << 24;
+    }
+    free(d);
+    return v;
 }
 
 /* the name table's entries the port uses (index -> name; %c is the faction's letter) */
@@ -61,11 +111,31 @@ static const char *shape_name(int i)
     return fixed[i];
 }
 
+/* 0x1007629f / 0x10075dd0: frac = (v << 16) / 319 (x) or / 199 (y), pixel = frac x 639 (or 479) >> 16, rounded by
+ * bit 15 */
+static int lay_px(int v, int full, int div)
+{
+    int64_t p = (int64_t)(((int64_t)v << 16) / div) * full;
+    return (int)(p >> 16) + (int)((p >> 15) & 1);
+}
+
+static int frac_of(int size, int frac);
+
 hud *hud_load(hg_archive *a, int faction)
 {
     hud *h = calloc(1, sizeof *h);
     if (!h) return NULL;
     const char f = faction ? 'S' : 'N';
+    const int set = faction ? 1 : 0;
+    h->faction = set;
+    for (int i = 0; i < 30; i++) {
+        h->wr[i][0] = lay_px(win_tab[set][i][0], 639, 319);
+        h->wr[i][1] = lay_px(win_tab[set][i][1], 479, 199);
+        h->wr[i][2] = lay_px(win_tab[set][i][2], 639, 319);
+        h->wr[i][3] = lay_px(win_tab[set][i][3], 479, 199);
+        h->hot[i][0] = frac_of(h->wr[i][2] - h->wr[i][0], hot_tab[set][i][0]);
+        h->hot[i][1] = frac_of(h->wr[i][3] - h->wr[i][1], hot_tab[set][i][1]);
+    }
     char nm[16];
     for (int i = 0; i < N_SHAPES; i++) {
         const char *n = shape_name(i);
@@ -75,6 +145,13 @@ hud *hud_load(hg_archive *a, int faction)
         load_shape(a, nm, &h->s[i]);
     }
     for (int i = 0; i < R_COUNT; i++) load_shape(a, radar_names[i], &h->radar[i]);
+    load_shape(a, "HMESSBAR", &h->bar);
+    load_shape(a, "ESCAPSCR", &h->esc);
+    load_shape(a, "SLIDEBAR", &h->slbar);
+    load_shape(a, "SLIDEKNB", &h->slknb);
+    h->esc_cv = shape_canvas(a, "ESCAPSCR");
+    h->slbar_cv = shape_canvas(a, "SLIDEBAR");
+    h->slknb_cv = shape_canvas(a, "SLIDEKNB");
     size_t len;
     uint8_t *d = hga_load(a, "SERPDEUS", "FNT", &len, NULL);
     if (d) fnt_parse(d, len, &h->font);
@@ -105,6 +182,10 @@ void hud_free(hud *h)
     for (int i = 0; i < GEAR_MAX_WEAPONS; i++) { shp_free(&h->icon[i][0]); shp_free(&h->icon[i][1]); }
     for (int i = 0; i < N_SHAPES; i++) shp_free(&h->s[i]);
     for (int i = 0; i < R_COUNT; i++) shp_free(&h->radar[i]);
+    shp_free(&h->bar);
+    shp_free(&h->esc);
+    shp_free(&h->slbar);
+    shp_free(&h->slknb);
     fnt_free(&h->font);
     free(h);
 }
@@ -121,6 +202,7 @@ void hud_state_simple(hud_state *st, float heading, float kph)
     st->ret_shape = HUD_RET_PROJ;
     st->tgt_contact = st->nav_contact = -1;
     st->radar_range = 200000;
+    st->radar_mode = 1;
 }
 
 static void put(hud *h, int x, int y, uint8_t c)
@@ -220,23 +302,27 @@ static void objective_text(hud *h, int x, int y, const char *label, const char *
 }
 
 /* DISPLAY_OBJECTIVES (0x100b21ce / 0x100b15fb) in window 13: (10, 100) - (260, 199) of the 320 x 200 layout, so
- * (20, 240) - (520, 477) here; INFERRED: its text position (11, 12) as the message box's (window 13's isn't read) */
+ * (20, 241) - (521, 479) here (0x1007629f / 0x10075dd0: v << 16 / 319 or / 199, times 639 or 479, rounded). Its text
+ * position is the window's hot spot (0x10020d48 copies the hot spots to 0x107f1d60, 0x1001e5c5 keeps them as the
+ * window's +0xf0): window 13's is (0, 0), so the text starts at the window's corner */
 static void objectives_list(hud *h, const hud_state *st)
 {
-    const int x0 = 20, x1 = 520, fh = h->font.height, half = fh / 2;
-    int y = 240 + 12;
-    window(h, x0, 240, x1, 477);
-    int tx = text(h, x0 + 11, y, "MISSION OBJECTIVES", 0x14);
-    for (int x = x0 + 11; x < tx; x++) put(h, x, y + fh, 0x14);   /* 0x10076a77: the title underlined (INFERRED) */
+    const int x0 = h->wr[13][0] + h->hot[13][0], y0 = h->wr[13][1] + h->hot[13][1], x1 = h->wr[13][2];
+    const int fh = h->font.height, half = fh / 2;
+    int y = y0;
+    window(h, h->wr[13][0], h->wr[13][1], h->wr[13][2], h->wr[13][3]);
+    int tx = text(h, x0, y, "MISSION OBJECTIVES", 0x14);
+    /* 0x10076a77: a line one font height down, from x to x - 1 + the glyphs' widths, in the title's colour */
+    line(h, x0, y + fh, tx - 1, y + fh, 0x14);
     y += fh + half;
     static const int cats[5] = {1, 2, 4, 0, 8};
     for (int c = 0; c < 5; c++) {
         for (int i = 0; i < st->nobjl; i++) {
             if (st->objl[i].order != cats[c] || !cats[c]) continue;   /* order 0 never shows (0x100b15fb) */
             const char *lab = cats[c] == 1 ? "Primary: " : cats[c] == 8 ? "Return: " : "Secondary: ";
-            text(h, x0 + 11, y, lab, 0x14);
+            text(h, x0, y, lab, 0x14);
             /* the text after the width of "Secondary: " (0x10187344), wrapped at 32 characters */
-            int x = x0 + 11 + text_width(h, "Secondary: ");
+            int x = x0 + text_width(h, "Secondary: ");
             const char *t = st->objl[i].text;
             int wrapped = 0;
             if (strlen(t) < 0x20) text(h, x, y, t, 0x0c);
@@ -258,7 +344,142 @@ static void objectives_list(hud *h, const hud_state *st)
         if (c != 2) y += half;   /* the gaps: after 1, 2, and 4 + 0 together */
     }
     y += fh;
-    if (st->time_line) text(h, x0 + 11, y, st->time_line, 0x14);
+    if (st->time_line) text(h, x0, y, st->time_line, 0x14);
+    window(h, 0, 0, 639, 479);
+}
+
+/* a 16.16 fraction of a window's size, as 0x10076149 rounds it */
+static int frac_of(int size, int frac)
+{
+    int64_t p = (int64_t)size * frac;
+    return (int)(p >> 16) + (int)((p >> 15) & 1);
+}
+
+/* a radio menu (0x100636da; its layout set by 0x10062baa). The radio channels' menu records (0x1011cbe0: 1, 2, 7..10
+ * the squad mates', 3 the mission channel) all draw in window 15 ((122, 13) - (258, 69): (244, 31) - (517, 166) here),
+ * flags 0xa, 8 rows, colours 0x0f (+0x4c) and 0x0f selected (+0x50), no selection marker; positions as fractions of
+ * the window: the title at (0.05, half a row), the numbers and the items' text from (0.05, two rows), a row being
+ * 1 / (rows + 2) of the window's height. The title is underlined in 0x1c (0x10076a77). An item: its number (itoa: 1,
+ * 2 ... counting the items that aren't spacers; the exit item 0, restarting the count) at the number column, its text
+ * 2 x the width of '0' + the width of '.' to the right; a text of 27 characters or more (0x1011cbd8, high resolution)
+ * breaks at character 28 if that is a space, else after the last space in the first 29, its rest (int)(fh / 1.5)
+ * lower in the same row. Rows step by the row height (the exit item would move to the last row without flag 8). */
+static void radio_menu(hud *h, const hud_state *st)
+{
+    const int wx0 = h->wr[15][0], wy0 = h->wr[15][1], ww = h->wr[15][2] - wx0, wh = h->wr[15][3] - wy0, rows = 8;
+    const int fh = h->font.height;
+    int rowf = 0x10000 / (rows + 2);
+    int tx = wx0 + frac_of(ww, 0xccd), ty = wy0 + frac_of(wh, (int)(((int64_t)rowf << 16) / 0x20000));
+    int nx = wx0 + frac_of(ww, 0xccd), iy = wy0 + frac_of(wh, rowf * 2), rowh = frac_of(wh, rowf);
+    int textoff = 2 * text_width(h, "0") + text_width(h, ".");
+    const char *title = st->menu_title;
+    int n = st->nmenu;
+    window(h, wx0, wy0, h->wr[15][2], h->wr[15][3]);
+    if (title) {
+        int e = text(h, tx, ty, title, 0x0f);
+        line(h, tx, ty + fh, e - 1, ty + fh, 0x1c);
+    }
+    int count = 0, y = iy;
+    for (int i = 0; i < n && i < HUD_MENU_MAX; i++, y += rowh) {
+        int type = st->menu[i].type;
+        const char *t = st->menu[i].text;
+        int x = nx;
+        if (type != HUD_MENU_SPACER) {
+            char num[12];
+            if (type == HUD_MENU_EXIT) count = 0; else count++;
+            snprintf(num, sizeof num, "%d", count);
+            text(h, nx, y, num, 0x0f);
+        }
+        if (!t) continue;
+        x = nx + textoff;
+        size_t len = strlen(t);
+        if (len < 27) { text(h, x, y, t, 0x0f); continue; }
+        int cut = 27, last = len > 28 ? 28 : (int)len - 1;
+        if ((len > 28 ? t[28] : 0) != ' ') { for (int k = last; k >= 0; k--) if (t[k] == ' ') { cut = k; break; } }
+        char a[64];
+        snprintf(a, sizeof a, "%.*s", cut + 1, t);
+        text(h, x, y, a, 0x0f);
+        text(h, x, (int)((float)y + (float)fh / 1.5f), t + cut + 1, 0x0f);
+    }
+    window(h, 0, 0, 639, 479);
+}
+
+/* 16.16 x (rounded, as 0x10075dd0 / 0x10076501) */
+static int fx_mul(int a, int b)
+{
+    int64_t p = (int64_t)a * b;
+    return (int)(p >> 16) + (int)((p >> 15) & 1);
+}
+
+/* The escape screen (radio menu record 5, 0x10118bb0; laid out by 0x10062baa with its record number 5, drawn by
+ * 0x100636da): the window (0x10118b80, fractions of the screen: (0x3ae1, 0x30a4) - (0x10000, 0xb333), 0x10075dd0 ->
+ * (147, 91) - (639, 335)); its background ESCAPSCR, the rect (0, 0) - (1, 1) scaled about its centre by the shape's
+ * canvas over the screen's size (0x10076501), made pixels, then moved across to the window's left (flag 0x10); rows
+ * 6; the title at (0x2e14 of the width, half a row), the numbers at 0x170a, the texts 2 x width('0') + width('.')
+ * further, the handler's column at 0x851f, every column's y two rows down (+0x7c: 0); colours 0x0c (+0x4c), the
+ * selected item 0x07 (+0x50); flags 0x11: no 4 (the title underlined in 0x1c, 0x10076a77), no 8 (the exit item goes
+ * to the last row). The font is the HUD's (0x10062e8e sets +0x44 = DAT_107ca7e0). A slider item (0x100645c0) draws
+ * SLIDEBAR at (its column / 3, the row's y + the font height) and SLIDEKNB on it at + value x (the bar's canvas
+ * width - 1) - (the knob's canvas width - 1) / 2; a choice item (0x10064deb) its string at the column. */
+static void escape_menu(hud *h, const hud_state *st)
+{
+    const int sw = 639, sh = 479;   /* DAT_107ee494 / DAT_107ee460 */
+    int wx0 = fx_mul(sw, 0x3ae1), wy0 = fx_mul(sh, 0x30a4), wx1 = fx_mul(sw, 0x10000), wy1 = fx_mul(sh, 0xb333);
+    if (h->esc.px) {
+        int cw = (int)(h->esc_cv >> 16), ch = (int)(h->esc_cv & 0xffff);
+        int sx = (int)((((int64_t)cw << 16) / (sw + 1) << 16) / 0x10001);
+        int sy = (int)((((int64_t)(ch << 16) & 0xffffffffLL) / (sh + 1) << 16) / 0x10001);
+        int c = 0x10001 >> 1;
+        int bx0 = fx_mul(sw, fx_mul(-c, sx) + c), by0 = fx_mul(sh, fx_mul(-c, sy) + c);
+        bx0 -= bx0 - wx0;
+        window(h, 0, 0, 639, 479);
+        blit(h, &h->esc, bx0, by0);
+    }
+    const int rows = 6, fh = h->font.height, ww = wx1 - wx0, wh = wy1 - wy0;
+    int rowf = 0x10000 / (rows + 2);
+    int rowh = frac_of(wh, rowf);
+    int tx = wx0 + frac_of(ww, 0x2e14), ty = wy0 + frac_of(wh, (int)(((int64_t)rowf << 16) / 0x20000));
+    int nx = wx0 + frac_of(ww, 0x170a), iy = wy0 + frac_of(wh, rowf * 2), hx = frac_of(ww, 0x851f);
+    int textoff = 2 * text_width(h, "0") + text_width(h, ".");
+    window(h, wx0, wy0, wx1, wy1);
+    if (st->menu_title) {
+        int e = text(h, tx, ty, st->menu_title, 0x0c);
+        line(h, tx, ty + fh, e - 1, ty + fh, 0x1c);
+    }
+    int count = 0, y = iy;
+    for (int i = 0; i < st->nmenu && i < HUD_MENU_MAX; i++, y += rowh) {
+        int type = st->menu[i].type;
+        uint8_t col = i == st->menu_sel ? 0x07 : 0x0c;
+        if (type == HUD_MENU_EXIT) y += (rows - i - 1) * rowh;   /* no flag 8: the exit item to the last row */
+        if (type != HUD_MENU_SPACER) {
+            char num[12];
+            if (type == HUD_MENU_EXIT) count = 0; else count++;
+            snprintf(num, sizeof num, "%d", count);
+            text(h, nx, y, num, col);
+        }
+        if (st->menu[i].text) text(h, nx + textoff, y, st->menu[i].text, col);
+        if (st->menu[i].kind == HUD_MENU_SLIDER && h->slbar.px) {
+            int bx = wx0 + hx / 3, by = y + fh;
+            blit(h, &h->slbar, bx, by);
+            int v = st->menu[i].value < 0 ? 0 : st->menu[i].value > 0x10000 ? 0x10000 : st->menu[i].value;
+            int kx = bx + fx_mul(v, (int)(h->slbar_cv >> 16)) - ((int)(h->slknb_cv >> 16) >> 1);
+            blit(h, &h->slknb, kx, by);
+        } else if (st->menu[i].kind == HUD_MENU_CHOICE && st->menu[i].vtext) {
+            text(h, wx0 + hx, y, st->menu[i].vtext, col);
+        }
+    }
+    window(h, 0, 0, 639, 479);
+}
+
+/* the message bar (0x10069f10 / 0x1006a27f): slot 0's rectangle is HMESSBAR's size (640 x 20) moved to the screen's
+ * top-left; the bar drawn at its corner, then the text at (0x28f of its width: 6, (its height + 1 - the font's
+ * height) / 2) in colour 0xfe. The sim shows a message for its ticks (0x1006a0ec: "Exiting Mission Area..." 0x1536). */
+static void message_bar(hud *h, const char *msg)
+{
+    const int bw = 637, bhgt = 18;
+    blit(h, &h->bar, 0, 0);
+    window(h, 0, 0, bw, bhgt);
+    text(h, frac_of(bw, 0x28f), (bhgt + 1 - h->font.height) / 2, msg, 0xfe);
     window(h, 0, 0, 639, 479);
 }
 
@@ -268,6 +489,10 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
     memset(h->on, 0, sizeof h->on);
     h->rm = NULL;
     window(h, 0, 0, 639, 479);
+    /* the windows draw before the nav marker (0x10021519: the windows' +0x13c, then 0x100538b0 -> 0x10054ae9); window
+     * 12's (0x100acc00) keeps the target's projection, in or out of view, whenever it has a target; without one the
+     * last stays */
+    if (st->tgt) { h->tpx = (int)st->tgt_x; h->tpy = (int)st->tgt_y; }
     char buf[64];
     /* the compass reads the heading the other way round: 360 - the engine's heading (mission 2 starts at -51 and reads
      * 50, mission 10 at 173 and reads 187, in the running original) */
@@ -278,20 +503,37 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
      * the mode's range (200000 in mode 1, the cockpit's) across the window's width. Its view lines (0x10088be7) run
      * from the centre at the view's half angle each side in colour 0x1c; then the player's group's shown navs
      * (0x100889c9: HRHNAVPN, HRHNAVPR once visited), the vehicles by side (0x100882b3: HRHFRGPN, HRHENGPN, HRHNEGPN),
-     * and the target / the selected nav highlighted (0x100885f3). INFERRED: clipped to the compass ring (radius
-     * 72), the window's own clip function isn't traced. */
-    {
-        int cx = (44 + 1 + 198) >> 1, cy = (22 + 1 + 166) >> 1;
-        float scale = 155.0f / (st->radar_range > 0 ? st->radar_range : 200000.0f);
-        window(h, 44, 22, 198, 166);
+     * and the target / the selected nav highlighted (0x100885f3). Each point passes the mode's clip (the mode record's
+     * +0x80, 0x1011eff8[4] = 0x10077c95): relative to the window, dx = x - ((w + 1) >> 1), dy = (int)((y - ((h + 1) >> 1))
+     * / the camera's aspect (1.0)), kept while dx^2 + dy^2 <= ((w + 1) / 2 - 1)^2 (w = x1 - x0 = 154: radius 76). The view
+     * lines end on the circle one smaller (0x10077e2f -> 0x10077fc6: (w + 1) / 2 - 2 = 75). */
+    /* the large radar (mode 2, 0x1011f430): its rectangle 0x2148 .. 0xdeb8 of the screen's width (16.16), all its
+     * height; the map (mode 4, 0x1011f4d8): the navs and the target / nav marks at their projections */
+    int big[4] = {frac_of(640, 0x2148), 0, frac_of(640, 0xdeb8), 479};
+    if (st->radar_mode == 4) {
+        window(h, 0, 0, 639, 479);
+        for (int i = 0; i < st->ncontacts; i++) {
+            int k = st->contact[i].kind, hl = i == st->tgt_contact || i == st->nav_contact;
+            if (!hl && k != HUD_RADAR_NAV && k != HUD_RADAR_NAV_SEEN) continue;   /* 0x100889c9, 0x100885f3 */
+            const hg_shape *s = &h->radar[k];
+            if (hl) s = k <= HUD_RADAR_NEUTRAL ? &h->radar[5 + k] : &h->radar[8];
+            blit(h, s, (int)st->contact[i].x, (int)st->contact[i].z);
+        }
+    } else if (!st->hud_off && (st->radar_mode == 1 || st->radar_mode == 2)) {
+        const int *r = st->radar_mode == 2 ? big : h->wr[0];
+        int cx = (r[0] + 1 + r[2]) >> 1, cy = (r[1] + 1 + r[3]) >> 1;
+        const int rclip = (r[2] - r[0] + 1) / 2 - 1, rline = rclip - 1;
+        float scale = (float)(r[2] - r[0] + 1) / (st->radar_range > 0 ? st->radar_range : 200000.0f);
+        window(h, r[0], r[1], r[2], r[3]);
         for (int s = -1; s <= 1; s += 2) {
             float a = s * 45.0f * 3.14159265f / 180.0f;
-            line(h, cx, cy, cx + (int)(sinf(a) * 72), cy - (int)(cosf(a) * 72), 0x1c);
+            line(h, cx, cy, cx + (int)(sinf(a) * rline), cy - (int)(cosf(a) * rline), 0x1c);
         }
         for (int i = 0; i < st->ncontacts; i++) {
             float x = st->contact[i].x * scale, y = -st->contact[i].z * scale;
             int hl = i == st->tgt_contact || i == st->nav_contact;
-            if (x * x + y * y > 72.0f * 72.0f) continue;
+            int dx = (int)x, dy = (int)y;
+            if (dx * dx + dy * dy > rclip * rclip) continue;
             int k = st->contact[i].kind;
             const hg_shape *s = &h->radar[k];
             if (hl) s = k <= HUD_RADAR_NEUTRAL ? &h->radar[5 + k] : &h->radar[8];
@@ -300,60 +542,59 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
         window(h, 0, 0, 639, 479);
     }
 
+    if (!st->hud_off) {
     /* compass, window 24 at (26, 0), hot spot (94, 94) (0x10055924): the ring HNCOMPS1 turned clockwise by that reading
      * (so the letter of the direction faced is at the top), the frame HNCOMPS0, the selected nav's marker HCMPSWPT
      * and the target's (HCMPSTGT for an enemy, HCMPSFRN otherwise) turned to their bearings, then the heading in
      * colour 0x0c at (165, 13) */
-    blit_rot(h, &h->s[1], 26 + 94, 0 + 94, hd);
-    blit(h, &h->s[0], 26, 0);
-    if (st->nav) blit_rot(h, &h->s[2], 26 + 94, 94, st->nav_bearing);
-    if (st->tgt) blit_rot(h, &h->s[st->tgt_side == 1 ? 3 : 82], 26 + 94, 94, st->tgt_bearing);
-    snprintf(buf, sizeof buf, "%d", (int)hd % 360);
-    text(h, 26 + 165, 13, buf, 0x0c);
+    {
+        int x0 = h->wr[24][0], y0 = h->wr[24][1], hx = x0 + h->hot[24][0], hy = y0 + h->hot[24][1];
+        blit_rot(h, &h->s[1], hx, hy, hd);
+        blit(h, &h->s[0], x0, y0);
+        if (st->nav) blit_rot(h, &h->s[2], hx, hy, st->nav_bearing);
+        if (st->tgt) blit_rot(h, &h->s[st->tgt_side == 1 ? 3 : 82], hx, hy, st->tgt_bearing);
+        snprintf(buf, sizeof buf, "%d", (int)hd % 360);
+        /* the heading's place (0x10040b50: the window's +0xac / +0xb0, North 0xcccd / 0xf5c, South 0x11ec / 0xa3d) */
+        int w = h->wr[24][2] - x0, ht = h->wr[24][3] - y0;
+        text(h, x0 + frac_of(w, h->faction ? 0x11ec : 0xcccd), y0 + frac_of(ht, h->faction ? 0xa3d : 0xf5c), buf, 0x0c);
+    }
 
     /* message box (0x100b26e6): HNMSGBX1 in window 15 at (244, 31), slid up to y -195 while closed (DAT_1014cb04; it
-     * slides down to half that when open), then HNMSGBX0 at window 14's corner (244, 0); the current objective at the
-     * window's text position (11, 12) */
-    blit(h, &h->s[5], 244, st->box_open ? 31 - 195 / 2 : 31 - 195);
-    blit(h, &h->s[4], 244, 0);
-    if (st->box_open) {
-        /* INFERRED: the opened box's lines, one a font height apart from the text position, the label in colour 4 */
-        window(h, 244, 0, 517, 233);
-        for (int i = 0; i < st->nbox && i < HUD_BOX_LINES; i++) {
-            int y = 12 + i * h->font.height, x = 244 + 11;
-            if (y + h->font.height > 31 - 195 / 2 + 195) break;
-            if (st->box[i].label) x = text(h, x, y, st->box[i].label, 4);
-            if (st->box[i].text) text(h, x, y, st->box[i].text, (uint8_t)st->box[i].colour);
-        }
-        window(h, 0, 0, 639, 479);
-    } else if (st->obj_label && st->obj_text) {
-        window(h, 244, 0, 517, 233);
-        objective_text(h, 244 + 11, 12, st->obj_label, st->obj_text);
+     * slides down to half that while a radio menu is open, 0x1014cb0c), then HNMSGBX0 at window 14's corner (244, 0);
+     * the current objective at the window's text position (0x10040bd1: +0xb4 / +0xb8 = 0xa3d / 0xccd of the window's
+     * 273 x 233, rounded: (11, 12)), drawn whether a menu is open or not */
+    blit(h, &h->s[5], h->wr[15][0], st->box_open ? h->wr[15][1] - 195 / 2 : h->wr[15][1] - 195);
+    blit(h, &h->s[4], h->wr[14][0], h->wr[14][1]);
+    if (st->obj_label && st->obj_text) {
+        const int *r = h->wr[14];
+        window(h, r[0], r[1], r[2], r[3]);
+        objective_text(h, r[0] + frac_of(r[2] - r[0], 0xa3d), r[1] + frac_of(r[3] - r[1], 0xccd), st->obj_label, st->obj_text);
         window(h, 0, 0, 639, 479);
     }
-    if (st->msg && !st->box_open) {
-        window(h, 244, 0, 517, 233);
-        text(h, 244 + 11, 12 + 2 * h->font.height, st->msg, 0x0f);
-        window(h, 0, 0, 639, 479);
-    }
+    if (st->box_open) { if (st->menu_style == 1) escape_menu(h, st); else radio_menu(h, st); }
 
     if (st->objlist) objectives_list(h, st);
 
     /* the nav marker (0x100545f7): the selected nav's point, if in view, as HWAYPNT0..6 in turn (one frame a draw),
      * remap 5 (as drawn), 7 once visited; its label "Way Point:<name>" (colour 0x1c) and "Range:<m>m" or "<km>k"
-     * (0x0f) in a box of colour 0x0c beside it (0x10054ae9). Out of view the label goes to window 20 at (10, 445).
-     * INFERRED: the label's offset from the marker (its ftol arguments aren't readable in the decompile). */
+     * (0x0f) in a box of colour 0x0c beside it (0x10054ae9): the text at ((int)(x + 20), (int)(y - 45)) (0x101011fc /
+     * 0x10101200), the second line a font height down; the box from 2 left / up of it, as wide as the longer line + 2
+     * and two font heights + 2 high, and a line from its bottom-left corner to ((int)x, (int)y - 10). Out of view, or
+     * within 30 pixels both ways of the target's projection (0x1014cab0 / 0x1014cab4), the label goes to window 20 at
+     * (10, 445): the lines at its (0, 0) and (0, 15). */
     if (st->nav) {
         char l1[64], l2[64];
         snprintf(l1, sizeof l1, "Way Point:%s", st->nav_name ? st->nav_name : "");
         if (st->nav_range <= 1000.0f) snprintf(l2, sizeof l2, "Range: %3.0fm", st->nav_range);
         else snprintf(l2, sizeof l2, "Range: %2.2fk", st->nav_range / 1000.0f);
-        if (st->nav_in_view) {
+        /* 0x10054bff: against 0x1014cab0 / 4, the target's projection as window 12's draw (0x100acc00) last left it */
+        int near_tgt = abs((int)(st->nav_x - (float)h->tpx)) <= 30 && abs((int)(st->nav_y - (float)h->tpy)) <= 30;
+        if (st->nav_in_view && !near_tgt) {
             int x = (int)st->nav_x, y = (int)st->nav_y;
             h->rm = h->remap[st->nav_seen ? 7 : 5];
             blit(h, &h->s[63 + st->frame % 7], x, y);
             h->rm = NULL;
-            int tx = x + 12, ty = y - 12, fh = h->font.height;
+            int tx = (int)(st->nav_x + 20.0f), ty = (int)(st->nav_y - 45.0f), fh = h->font.height;
             text(h, tx, ty, l1, 0x1c);
             text(h, tx, ty + fh, l2, 0x0f);
             int bw = text_width(h, l1), b2 = text_width(h, l2);
@@ -364,10 +605,12 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
             line(h, tx - 2 + bw, ty - 2, tx - 2 + bw, ty - 2 + bh, 0x0c);
             line(h, tx - 2 + bw, ty - 2 + bh, tx - 2, ty - 2 + bh, 0x0c);
             line(h, tx - 2, ty - 2 + bh, tx - 2, ty - 2, 0x0c);
+            line(h, tx - 2, ty - 2 + bh, x, y - 10, 0x0c);
         } else {
-            window(h, 10, 445, 168, 479);
-            text(h, 10, 445, l1, 0x0f);
-            text(h, 10, 445 + 15, l2, 0x0f);
+            const int *r = h->wr[20];
+            window(h, r[0], r[1], r[2], r[3]);
+            text(h, r[0], r[1], l1, 0x0f);
+            text(h, r[0], r[1] + 15, l2, 0x0f);
             window(h, 0, 0, 639, 479);
         }
     }
@@ -406,7 +649,7 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
      * through a remap by its zone's damage level, 15 - (int)((internal / 2 + armor / 2) x 3 / zone +0x38): 0 -> table
      * 5 (as drawn), 1-7 -> 7, 8-14 -> 4, 15 -> 8 (a 15 with internal points left reads 14). Parts: backpack 7, head 1,
      * torso 2, right arm 3, left arm 4, right leg 5, left leg 6 (0x10122d88) */
-    blit(h, &h->s[6], 519, 0);
+    blit(h, &h->s[6], h->wr[1][0], h->wr[1][1]);
     {
         static const int zone_of[7] = {7, 1, 2, 3, 4, 5, 6};
         for (int i = 0; i < 7; i++) {
@@ -418,7 +661,7 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
                 if (lvl == 15 && st->internal[z] > 0.0f) lvl = 14;
             }
             h->rm = h->remap[lvl == 15 ? 8 : lvl == 0 ? 5 : lvl < 8 ? 7 : 4];
-            blit(h, &h->s[7 + i], 519 + 29, 0 + 7);
+            blit(h, &h->s[7 + i], h->wr[1][0] + h->hot[1][0], h->wr[1][1] + h->hot[1][1]);
         }
         h->rm = NULL;
     }
@@ -430,36 +673,43 @@ void hud_draw(const hud *hc, uint32_t *color, int w, int h_, const uint8_t (*pal
         int lvl = (int)(st->throttle * 22.0f);
         if (lvl < 0) lvl = 0;
         if (lvl > 21) lvl = 21;
-        blit(h, &h->s[15], 0, 2);
-        blit(h, &h->s[15 + lvl], 0, 2);
+        int x0 = h->wr[18][0], y0 = h->wr[18][1], tx = x0 + h->hot[18][0], ty = y0 + h->hot[18][1];
+        blit(h, &h->s[15], x0, y0);
+        blit(h, &h->s[15 + lvl], x0, y0);
         int kph = (int)st->kph;
         snprintf(buf, sizeof buf, "%3d", st->backward ? -kph : kph);
         uint8_t c = st->backward ? 0x14 : 0x0c;
-        text(h, 0, 2, buf, c);
-        text(h, 0, 2 + h->font.height, "Kph", c);
+        text(h, tx, ty, buf, c);
+        text(h, tx, ty + h->font.height, "Kph", c);
     }
 
     /* weapon panels, windows 3..10 at (523, 135 + 29k): one per weapon slot (0x100b9e60). HNWEPNBX at the corner, the
      * weapon's icon at the hot spot (39, 4) (high resolution only; its damaged icon once its zone is destroyed), the
      * ammunition (when above 0) at (8, 0) and the short name at (8, 10) in colour 0x0f (a slot of kind 1, subkind 0);
      * the selected slot (gear block +0x4fc, 0 at the start) gets its window's border in that colour (0x10076871). */
-    static const int wy[8] = { 135, 164, 193, 221, 250, 279, 308, 337 }, wy1[8] = { 159, 188, 217, 246, 274, 303, 332, 361 };
     for (int k = 0; k < h->g.nweapons && k < 8; k++) {
         const gear_weapon *wp = &h->g.weapon[k];
-        int x = 523, y = wy[k];
-        window(h, 523, y, 635, wy1[k]);   /* each window draws into its own rectangle */
+        const int *r = h->wr[3 + k];
+        int x = r[0], y = r[1], x1 = r[2], y1 = r[3];
+        window(h, x, y, x1, y1);   /* each window draws into its own rectangle */
         blit(h, &h->s[14], x, y);
         const hg_shape *ic = &h->icon[k][st->gone[k] && h->icon[k][1].px ? 1 : 0];
-        if (ic->px) blit(h, ic, x + 39, y + 4);
+        if (ic->px) blit(h, ic, x + h->hot[3 + k][0], y + h->hot[3 + k][1]);
         int ammo = st->ammo[k] >= 0 ? st->ammo[k] : wp->ammo;
         if (ammo > 0) { snprintf(buf, sizeof buf, "%d", ammo); text(h, x + 8, y + 0, buf, 0x0f); }
         if (wp->name) text(h, x + 8, y + 10, wp->name, 0x0f);
         if (k == st->selected) {
-            for (int i = 523; i <= 635; i++) { put(h, i, y, 0x0f); put(h, i, wy1[k], 0x0f); }
-            for (int j = y; j <= wy1[k]; j++) { put(h, 523, j, 0x0f); put(h, 635, j, 0x0f); }
+            for (int i = x; i <= x1; i++) { put(h, i, y, 0x0f); put(h, i, y1, 0x0f); }
+            for (int j = y; j <= y1; j++) { put(h, x, j, 0x0f); put(h, x1, j, 0x0f); }
         }
     }
+    }
     window(h, 0, 0, 639, 479);
+    if (st->msg && st->msg[0]) message_bar(h, st->msg);
+    /* 0x10056944: the line centred (half the screen's width less half its width), three font heights above the
+     * screen's bottom, colour 7 (the colour table's 0x0e) */
+    if (st->warn && st->warn[0])
+        text(h, 320 - (int)(text_width(h, st->warn) * 0.5), 479 - 3 * h->font.height, st->warn, 7);
     /* composite, scaled from 640 x 480 */
     for (int y = 0; y < h_; y++) {
         int sy = y * 480 / h_;

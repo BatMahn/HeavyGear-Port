@@ -7,12 +7,14 @@
 #include "../src/shell_picture.h"
 #include "../src/shell_tables.h"
 #include "../src/gear.h"
+#include "../src/gearmodel.h"
 #include "../src/mission.h"
 #include "../src/shp.h"
 #include "../src/hgprj.h"
 #include "../src/tex.h"
 #include "../src/wtb.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -194,6 +196,59 @@ int main(int argc, char **argv)
         printf("gear editor designs: %d rebuilt as shipped (%d parts' links from other ODFs), %d differ\n", ok, links, bad);
         brf_bad += bad;
     }
+    /* the Hunter standing (GRFSTAND, the rifle set): its parts as the running original's objects had them (mission 1,
+     * the player's gear, relative to its root and facing) */
+    int pose_bad = 0;
+    {
+        gearmodel gm;
+        gear gr;
+        int ty[GEAR_MAX_WEAPONS], ki[GEAR_MAX_WEAPONS];
+        if (gearmodel_load(a, "gdhuntea", &gm) || gear_load(a, "gdhuntea", &gr)) pose_bad = 1;
+        else {
+            for (int i = 0; i < gr.nweapons; i++) { ty[i] = gr.weapon[i].type; ki[i] = gr.weapon[i].kind; }
+            if (gearmodel_stand(&gm, a, ty, ki, gr.nweapons, gr.version)) pose_bad = 1;
+            static const struct { int rec; float x, y, z; } want[] = {
+                {40, 128.6f, 111.1f, -10.6f}, {41, 128.0f, 70.8f, 40.1f}, {43, 128.0f, 71.8f, 103.8f},
+                {44, 125.2f, 72.0f, 139.4f}, {45, 125.7f, 98.3f, 344.4f}, {46, 123.4f, 79.0f, 120.8f},
+                {28, 0.0f, 155.6f, 48.3f},
+            };
+            for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+                const float *r = gm.rec[want[i].rec];
+                if (fabsf(r[0] - want[i].x) > 0.2f || fabsf(r[1] - want[i].y) > 0.2f || fabsf(r[2] - want[i].z) > 0.2f) {
+                    printf("pose: record %d at %.1f %.1f %.1f\n", want[i].rec, r[0], r[1], r[2]);
+                    pose_bad++;
+                }
+            }
+            /* the camera (0x100373fc): the eye lifted by its own offset's y, 0x100c4c26 */
+            if (fabsf(gm.eye[1] + gm.eye_local[1] - 171.3f) > 0.2f || fabsf(gm.stand - 245.3f) > 0.1f) pose_bad++;
+        }
+        printf("gear pose: the Hunter standing %s\n", pose_bad ? "DIFFERS" : "as the original");
+        /* the walk (0x1003fbb7 / 0x10013d53): GRFWALKF (41 frames at 30 a second, footsteps on 5 and 25) picked at
+         * half throttle, blended in over 10 steps, then stepped 1 frame a 6-tick frame (ftol(30 x 6 / 181 + 0.5));
+         * a foot comes down at frame 5 and 25; the soles stay on the ground (the standing height kept) */
+        int walk_bad = 0;
+        if (!pose_bad) {
+            anim_player ap;
+            anim_player_init(&ap);
+            anim_in in = {0};
+            in.cls = 1; in.set = gm.anim_set; in.thr = 1.0f / 64 + 0.5f / 64;
+            unsigned fl = 0;
+            int steps = 0, feet = 0;
+            const anim3di *w = anim_get(a, 0x10a);
+            if (!w || w->frames != 41 || w->fps != 30 || w->nev != 2 || w->ev[0].frame != 5 || w->ev[1].frame != 25) walk_bad++;
+            anim_pick(&ap, &in, &fl);   /* standing first: the stand at rate 2 (t 0.5: band 0.0078..0.0117 -> 3) */
+            for (steps = 0; steps < 200; steps++) {
+                anim_pick(&ap, &in, &fl);
+                anim_advance(&ap, a, 6, &fl, 0);
+                gearmodel_animate(&gm, &ap, fl, 1);
+                if (ap.footstep) { feet++; ap.footstep = 0; }
+                if (fabsf(gm.stand - 245.3f) > 0.1f) walk_bad++;
+            }
+            if (ap.cur != 0x10a || ap.rate != 3 || feet < 10) walk_bad++;
+            printf("gear walk: GRFWALKF rate %d, %d footsteps in 200 frames %s\n", ap.rate, feet, walk_bad ? "DIFFERS" : "ok");
+            pose_bad += walk_bad;
+        }
+    }
     hga_close(a);
-    return wtb_bad || tex_bad || xel_bad || start_bad || fnt_bad || gear_bad || brf_bad;
+    return pose_bad || wtb_bad || tex_bad || xel_bad || start_bad || fnt_bad || gear_bad || brf_bad;
 }

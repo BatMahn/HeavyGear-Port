@@ -43,16 +43,18 @@ struct modelview {
     float        mn[3], mx[3];
     uint8_t     *luma;      /* FOG.TBL (32 x 256), NULL if absent */
     int          luma_tried;
+    int          ambient;   /* the light's +0x2a: 45 (FUN_1008f502 draws a gear over the game's level with 5) */
     raster_target rt;
     /* the last drawing's view (for modelview_screen / modelview_pick) */
     int          drawn, vx0, vy0, vw, vh;
     float        place[3], turn;
+    int          clip, cx0, cy0, cx1, cy1;   /* modelview_clip: the screen rectangle drawn into */
 };
 
 modelview *modelview_open(hg_archive *a)
 {
     modelview *v = calloc(1, sizeof *v);
-    if (v) v->a = a;
+    if (v) { v->a = a; v->ambient = 45; }
     return v;
 }
 
@@ -211,6 +213,22 @@ int modelview_set_data(modelview *v, const uint8_t *d, size_t len, const char (*
     return setup(v);
 }
 
+int modelview_set_parts(modelview *v, const char (*model)[9], const float (*pos)[3], int n)
+{
+    v->gear[0] = 0;
+    v->has = 0;
+    memset(&v->gm, 0, sizeof v->gm);
+    for (int i = 0; i < n && i < GEARMODEL_MAX; i++) {
+        gearmodel_part *q = &v->gm.part[v->gm.nparts++];
+        snprintf(q->model, sizeof q->model, "%s", model[i]);
+        snprintf(q->model0, sizeof q->model0, "%s", model[i]);
+        q->x = pos[i][0]; q->y = pos[i][1]; q->z = pos[i][2];
+        q->rec = -1;
+        q->parent = -1;
+    }
+    return setup(v);
+}
+
 /* The camera (traced): the shell's camera (0x10204500) sits at the origin looking along +z, unturned; its zoom
  * (+0x18) is 1.0 and its aspect (+0x44) 480 x 4/3 / 640 = 1.0 (0x10178ff3). Projection (0x10056736, set up per
  * drawing by 0x100c4a40 from the view's rectangle): centre ((x0 + 1 + x1) >> 1, (y0 + 1 + y1) >> 1), focal length
@@ -251,7 +269,7 @@ static void xf_point(const mv_xf *t, float x, float y, float z, float out[3])
  * textured polygon's draw word, 0x10039900), clamped to 4..31. The shell hands the renderer row << 3 (0x10035fff's
  * caller, software: no | 7) and the table upside down (0x10035fff), so the TBL row is 31 - (1 - (row << 3) / 255) x
  * 31, as world.c. Returns that index; *light the L for the true-colour look. */
-static float vertex_luma(const float rel[3], const wtb_vertex *v, float *light)
+static float vertex_luma(const float rel[3], const wtb_vertex *v, float *light, int ambient)
 {
     float lx = rel[0] - v->x, ly = rel[1] - v->y, lz = rel[2] - v->z;
     /* the length (0x1003e364): the largest of |x|, |y|, |z| plus a quarter of the other two */
@@ -259,7 +277,7 @@ static float vertex_luma(const float rel[3], const wtb_vertex *v, float *light)
     if (ax < az) { big = az; o1 = ax; }
     if (big < ay) { float b0 = big; big = ay; o2 = b0; }
     float len = (big * 4.0f + o1 + o2) / 4.0f;
-    int L = 45;
+    int L = ambient;
     if (ax < 1e-7f && ay < 1e-7f && az < 1e-7f) L += 0x7f;   /* at the light: 0x7f (0x100480ac) */
     else if (len > 0) {
         int i = (int)((v->nx * lx + v->ny * ly + v->nz * lz) / len * 128.0f);
@@ -284,6 +302,16 @@ static void load_luma(modelview *v)
     size_t len;
     uint8_t *d = hga_load(v->a, "FOG", "TBL", &len, NULL);   /* the shell's luma table (0x1012b1e8 -> 0x10035fff) */
     if (d && len >= 32 * 256) v->luma = d; else free(d);
+}
+
+void modelview_clip(modelview *v, int on, int x0, int y0, int x1, int y1)
+{
+    v->clip = on; v->cx0 = x0; v->cy0 = y0; v->cx1 = x1; v->cy1 = y1;
+}
+
+void modelview_set_ambient(modelview *v, int ambient)
+{
+    if (v) v->ambient = ambient;
 }
 
 void modelview_draw(modelview *v, uint32_t *out, const uint8_t (*pal)[3], int x0, int y0, int x1, int y1,
@@ -321,7 +349,7 @@ void modelview_draw(modelview *v, uint32_t *out, const uint8_t (*pal)[3], int x0
                 xf_point(&t, mv->x + pt->x, mv->y + pt->y, mv->z + pt->z, c);
                 if (c[2] < t.nearz) { ok = 0; break; }
                 float lit, iz = 1.0f / c[2];
-                rv[k].lum = vertex_luma(rel, mv, &lit);
+                rv[k].lum = vertex_luma(rel, mv, &lit, v->ambient);
                 rv[k].x = t.cx + c[0] * t.f * iz;
                 rv[k].y = t.cy - c[1] * t.f * iz;
                 rv[k].iw = iz; rv[k].u = mv->u; rv[k].v = mv->v;
@@ -343,6 +371,7 @@ void modelview_draw(modelview *v, uint32_t *out, const uint8_t (*pal)[3], int x0
         for (int i = 0; i < w; i++) {
             int xx = x0 + i;
             if (xx < 0 || xx >= 640 || v->rt.depth[(size_t)j * w + i] <= 0) continue;
+            if (v->clip && (xx < v->cx0 || xx > v->cx1 || yy < v->cy0 || yy > v->cy1)) continue;
             out[(size_t)yy * 640 + xx] = v->rt.color[(size_t)j * w + i] | 0xff000000u;
         }
     }

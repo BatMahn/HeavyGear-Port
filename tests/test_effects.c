@@ -38,7 +38,7 @@ int main(void)
     strcpy(model[0x2a], "wxexplod"); count[0x2a] = 20;
     strcpy(model[0x17], "wxmgnmzl"); count[0x17] = 2;
     strcpy(model[0x2f], "wxflamob"); count[0x2f] = 10;
-    effects_ops ops = {NULL, f_add, f_set, f_pos, f_ground, f_radius, f_turn, f_splash};
+    effects_ops ops = {NULL, f_add, f_set, f_pos, f_ground, f_radius, f_turn, f_splash, NULL};
     effects fx;
     effects_init(&fx, &ops, (const char (*)[17])model, count);
     CHECK(!effects_start(&fx, 5, 0, 0, 0, -1));                 /* no pool: nothing (no sound either) */
@@ -77,7 +77,7 @@ int main(void)
     strcpy(model[0x0b], "wgchunk0"); count[0x0b] = 15;
     CHECK(effects_debris(&fx, 0, 500, 0, 8) == 8);
     CHECK(effects_debris(&fx, 0, 500, 0, 16) == 7);
-    effects_tick(&fx, 1000);
+    effects_tick(&fx, 3000);   /* the tables' highest throws take ~1100 ticks to come down */
     int resting = 0, low = 1;
     for (int i = 0; i < fx.n; i++) if (fx.s[i].type == 0x0b && fx.s[i].on) {
         resting += !fx.s[i].body;

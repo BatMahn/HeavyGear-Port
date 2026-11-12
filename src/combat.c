@@ -1,4 +1,5 @@
 #include "combat.h"
+#include "hgrand.h"
 
 #include "gear_tables.h"
 
@@ -11,6 +12,8 @@
 int combat_init(combatant *c, hg_archive *a, const char *gdf, float internal_scale)
 {
     memset(c, 0, sizeof *c);
+    c->vclass = 1;
+    c->strike_zone = 2;
     if (gear_load(a, gdf, &c->gr)) return -1;
     for (int z = 0; z < GEAR_ZONES; z++) {
         c->armor[z] = c->gr.armor[z];
@@ -52,12 +55,28 @@ void combat_cycle(combatant *c)
     }
 }
 
+/* the weapon's +0x76 (0x101192f0 + type x 0xd6): 3 for the hand grenades (types 0x1c, 0x26, 0x27, kind 0x3d), whose
+ * shells bounce (0x10018975 runs 0x100191d7 for them, 0x10019f1d for the 0s) */
+static int weapon_motion(int type)
+{
+    return type == 0x1c || type == 0x26 || type == 0x27 ? 3 : 0;
+}
+
 static void spawn(combat_shots *s, int owner, int type, int power, const float from[3], const float to[3], int lock)
 {
     const gear_weapon_stats *st = &gear_weapon_stat[type];
     float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
     float l = sqrtf(dx * dx + dy * dy + dz * dz);
     if (l < 1e-3f) return;
+    if (!st->beam && s->pool_cap) {
+        /* 0x100bb425: a free object of the kind's pool (the shot table's entries of that kind not in flight) */
+        int cap = s->pool_cap(s->pool_ctx, st->kind), busy = 0;
+        for (int i = 0; i < COMBAT_MAX_SHOTS; i++)
+            if (s->shot[i].active && !s->shot[i].beam && gear_weapon_stat[s->shot[i].type].kind == st->kind) busy++;
+        if (busy >= cap) return;
+    }
+    float off = 0;
+    if (!st->beam && s->pool_radius && !(st->flags & 0x40)) off = 2.0f * s->pool_radius(s->pool_ctx, st->kind);
     for (int i = 0; i < COMBAT_MAX_SHOTS; i++) {
         combat_shot *p = &s->shot[i];
         if (p->active) continue;
@@ -65,18 +84,35 @@ static void spawn(combat_shots *s, int owner, int type, int power, const float f
         p->owner = owner;
         p->type = type;
         p->power = power;
-        p->x = from[0]; p->y = from[1]; p->z = from[2];
+        /* 0x100bd1e7: the object is moved twice its model's radius along the aim unless the weapon's +8 has 0x40 */
+        p->x = from[0] + dx / l * off; p->y = from[1] + dy / l * off; p->z = from[2] + dz / l * off;
+        if (st->kind == 0x3e || st->kind == 0x3f) {
+            /* 0x100bd1e7 (its 6th argument 1 for kinds 0x3e / 0x3f, 0x100baf31): r = rand(200) - 100; the side
+             * s = (-dz, 0, dx) normalized (0x1006f915), u = (dy sz, sz dx + dz sx, -sx dy); the start moves by
+             * r (u + s) (y by r u.y), d the aim's unit vector */
+            float ux = dx / l, uy = dy / l, uz = dz / l;
+            float sx = -uz, sz = ux, sl = sqrtf(sx * sx + sz * sz);
+            if (sl > 1e-6f) { sx /= sl; sz /= sl; }
+            float r = (float)(rand() % 200 - 100);
+            float vx = uy * sz, vy = sz * ux + uz * sx, vz = -(sx * uy);
+            p->x += r * vx + r * sx;
+            p->y += r * vy;
+            p->z += r * vz + r * sz;
+        }
+        p->serial = ++s->serial;
+        p->flags = 0;
+        p->motion = weapon_motion(type);
         p->vx = dx / l * st->speed; p->vy = dy / l * st->speed; p->vz = dz / l * st->speed;
         p->ax = p->az = 0;
         p->ay = -GRAVITY * (float)st->gravity;
         p->life = st->life;
+        p->beam = st->beam;
         if (st->beam) {
-            /* a beam (0x100baf31 / 0x10018a9c): the ray along the aim is tested at once, struck within the weapon's
-             * reach (+0x50); here one tick's flight over that reach, straight (INFERRED: one hit a beam) */
-            float reach = st->max_range > 0 ? st->max_range : st->speed * (float)st->life;
-            p->vx = dx / l * reach; p->vy = dy / l * reach; p->vz = dz / l * reach;
-            p->ay = 0;
-            p->life = 1;
+            /* a beam (0x100baf31): it takes a slot of the beam pool, its life the weapon's +0x5c less the weapon
+             * slot's +0x10 (0 here: that field isn't traced), its ray the vehicle's mount along its aim; the tests
+             * are combat_beams_frame's */
+            p->dir[0] = dx / l; p->dir[1] = dy / l; p->dir[2] = dz / l;
+            p->vx = p->vy = p->vz = p->ay = 0;
         }
         p->target = (st->sflags & 1) ? lock : -1;   /* 0x100bb425: a guided weapon takes the slot's target */
         p->age = 0;
@@ -90,6 +126,7 @@ int combat_weapons_tick(combatant *c, int owner, int trigger, const float from[3
                         combat_mount_fn mount, void *mctx, combat_shots *s)
 {
     if (c->dead) return 0;
+    if (c->stun > 0) trigger = 0;   /* 0x100bb425: no firing while the power is out (+0xc3d) */
     int fired = 0, pulled = trigger && !c->trigger_was;
     c->trigger_was = trigger;
     for (int k = 0; k < c->gr.nweapons; k++) {
@@ -97,9 +134,11 @@ int combat_weapons_tick(combatant *c, int owner, int trigger, const float from[3
         if (c->state[k] < 0 || t < 0 || t >= GEAR_WEAPON_TYPES) continue;
         const gear_weapon_stats *st = &gear_weapon_stat[t];
         int selected = k == c->sel;
+        int in_group = c->fire_all && c->sel >= 0 && c->sel < c->gr.nweapons && c->wgroup[k] == c->wgroup[c->sel] &&
+                       (st->flags & 4);
         switch (c->state[k]) {
         case 1:
-            if (!(selected && pulled)) break;
+            if (!((selected || in_group) && pulled)) break;
             c->state[k] = 2; c->left[k] = st->burst; c->timer[k] = 0;
             /* the pull's tick counts toward the first shot (0x100ba550 starts the count that tick) */
             /* fall through */
@@ -112,7 +151,7 @@ int combat_weapons_tick(combatant *c, int owner, int trigger, const float from[3
                 spawn(s, owner, t, st->power + c->gr.weapon[k].power_bonus, f, to, c->lock);
                 fired++;
             }
-            if (--c->ammo[k] <= 0) { c->state[k] = -1; break; }
+            if (!c->unlimited_ammo && --c->ammo[k] <= 0) { c->state[k] = -1; break; }
             if (--c->left[k] <= 0) { c->state[k] = 3; c->timer[k] = 0; }
             break;
         case 3:
@@ -132,7 +171,7 @@ static void destroy_zone(combatant *c, int zone)
     c->armor[zone - 1] = c->internal[zone - 1] = 0;
     switch (zone) {
     case 1:
-        c->dead = 1;   /* gears and infantry (class 1 / 9); other vehicles lose the part (INFERRED: all die) */
+        if (c->vclass == 1 || c->vclass == 9) c->dead = 1;   /* other vehicles only lose the part (0x1005ab68) */
         break;
     case 2: case 7:
         destroy_zone(c, 3); destroy_zone(c, 4); destroy_zone(c, 1);
@@ -141,15 +180,29 @@ static void destroy_zone(combatant *c, int zone)
     case 3: case 4:
         break;
     case 5: case 6:
-        c->crippled = 1;          /* gears and infantry fall and crawl (0x1005ab68: +0x500 = 0) */
+        c->crippled = 1;          /* 0x1005ab68: +0x500 = 0, +0x560 | 0x20 */
         c->speed_factor = 0;
+        c->legs_gone = 1;
+        if (c->vclass == 1 || c->vclass == 9) c->fall |= hg_rand(2) == 0 ? 4u : 0x400u;   /* +0xc19 2 / 1 */
+        if (c->vclass == 1) c->fall |= zone == 5 ? 0x4000u : 0x2000u;
         break;
     case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16:
-        for (int k = 0; k < c->gr.nweapons; k++) if (c->gr.weapon[k].kind == zone) c->state[k] = -1;
+        /* version 1 records carry kinds 0x21..0x2c: their zone (0x1003cd60's table) */
+        for (int k = 0; k < c->gr.nweapons; k++) {
+            int wk = c->gr.weapon[k].kind;
+            static const int v1[12] = {14, 16, 13, 15, 0, 11, 9, 0, 12, 10, 0, 8};   /* 0x21..0x2c */
+            if (wk > 16) wk = wk >= 0x21 && wk <= 0x2c ? v1[wk - 0x21] : 0;
+            if (wk == zone) c->state[k] = -1;
+        }
         break;
     default:
         c->dead = 1;
     }
+}
+
+void combat_destroy_zone(combatant *c, int zone)
+{
+    destroy_zone(c, zone);
 }
 
 static void say(combatant *c, int subject, int verdict)
@@ -187,7 +240,7 @@ static void crit(combatant *c, int zone, int i)
     case 0:
         if (i < c->crit_n[zone]) crit(c, zone, i + 1);
         break;
-    case 0x1b8a: destroy_zone(c, zone); break;
+    case 0x1b8a: c->crit_zones++; destroy_zone(c, zone); break;   /* the player's: HGCAR +0x138 (0x1005b5c6) */
     case 0x1bee:   /* low-light (head option bit 1, +0xbaf) and satellite uplink (bit 7, +0xbb3) */
         if (c->gr.head_flags & 2) { say(c, 1, 3); c->gr.head_flags &= ~2; }
         if (c->gr.head_flags & 0x80) { say(c, 0x10, 3); c->gr.head_flags &= ~0x80; }
@@ -210,9 +263,10 @@ static void crit(combatant *c, int zone, int i)
         if (c->hyd_spare) { c->hyd_spare = 0; return; }
         say(c, 0x28, 2); c->speed_factor *= 0.9f; break;
     case 0x1e14: say(c, 0x29, -1); break;
-    case 0x1e46: say(c, 0xc, 2); break;                                 /* torso (its twist stops) */
+    case 0x1e46: say(c, 0xc, 2); if (c->vclass == 1 || c->vclass == 9) c->knock = 1; break;   /* +0xc15: knocked down */
     case 0x1e78: say(c, 0xd, 2); break;
-    case 0x1eaa: if (c->gr.power_spare) return; say(c, 0x2a, -1); break;   /* +0xbbf: the torso's field 2 is 9 */
+    case 0x1eaa: if (c->gr.power_spare) return; say(c, 0x2a, -1); c->stun = 0x21f; break;   /* +0xbbf: the torso's field 2
+                                                                                     * is 9; +0xc3d = 0x21f */
     case 8000: if (c->gr.head_flags & 0x800) return; say(c, 0xf, 2); break;   /* cockpit; head bit 11 (+0xbb7) */
     case 9000:                                                          /* a weapon in this zone (0x1005bfca) */
         for (int k = 0; k < c->gr.nweapons; k++)
@@ -236,7 +290,13 @@ int combat_damage(combatant *c, int type, int power, int zone)
 
 int combat_damage_raw(combatant *c, int power, float mult, int chip, int mode, int zone)
 {
-    if (c->dead || zone < 1 || zone > GEAR_ZONES) return 0;
+    if (c->dead || c->invulnerable) return 0;
+    /* 0x1005c1f8: zones 1..0x11 (a part of zone 0 stops the shot, unharmed); the legs (5 / 6) only on gears and
+     * infantry */
+    if (zone < 1 || zone > GEAR_ZONES || ((zone == 5 || zone == 6) && c->vclass != 1 && c->vclass != 9)) {
+        c->pierced = 0;
+        return 0;
+    }
     struct { float mult; int chip; } stv = {mult, chip}, *st = &stv;
     float *ar = &c->armor[zone - 1], *in = &c->internal[zone - 1];
     int pen = (mode == 3 || mode == 4) ? (int)((float)power - *ar / 2.0f) : (int)((float)power - *ar);
@@ -277,11 +337,54 @@ int combat_damage_raw(combatant *c, int power, float mult, int chip, int mode, i
      * 5 percent, plus the damage / 50, held to the zone's count */
     if (inner && zone <= 16 && c->crit_n[zone] > 0) {
         for (int r = 0; r < 2 && !c->dead; r++) {
-            int q = rand() % 100;
+            int q = hg_rand(100);   /* 0x10089e69 */
             int i = (q < 5 ? -5 : q < 0x19 ? -1 : q < 0x4b ? 0 : q < 0x5f ? 1 : 5) + amount / 0x32;
             if (i >= c->crit_n[zone]) i = c->crit_n[zone];
             if (i >= 0) crit(c, zone, i);
         }
+    }
+    return 0;
+}
+
+/* A bouncing shell's step (0x100191d7): a vehicle struck takes the hit and ends it; an object flagged 0x800 (the
+ * ground's tiles: here also the ground itself) halves its x and z speed and turns back and halves its y speed, flags
+ * the shell 0x400 and throws a spray (0x1008514d); 0x400 flags it 0x200; any other object (0x200 or none) turns its
+ * x and z speed back. It moves on while above the ground. Its life run out, it strikes where it is (0x1001b224 with
+ * its effect) */
+static int bounce_tick(combat_shots *s, const combat_world *w, combat_shot *p, const float p0[3], const float p1[3])
+{
+    float t;
+    int zone, v = w->hit(w->ctx, p->owner, p0, p1, &t, &zone);
+    combatant *c = v >= 0 ? w->victim(w->ctx, v) : NULL;
+    if (c) {
+        float at[3] = {p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, p0[2] + (p1[2] - p0[2]) * t};
+        int alive = !c->dead;
+        if (combat_damage(c, p->type, p->power, zone) && s->ev.killed) s->ev.killed(s->ev.ctx, v, p->owner);
+        if (w->hit_vehicle) w->hit_vehicle(w->ctx, v, p->owner);
+        if (s->ev.impact) s->ev.impact(s->ev.ctx, p->owner, p->type, v, alive ? c->pierced : -1, at);
+        p->active = 0;
+        return 1;
+    }
+    float gy = w->ground_y(w->ctx, p1[0], p1[2]);
+    unsigned of = 0;
+    int struck = 0;
+    if (v >= 0) { struck = 1; of = s->obj_flags ? s->obj_flags(s->pool_ctx, v) : 0; }
+    else if (p1[1] < gy) { struck = 1; of = 0x800; }
+    if (struck) {
+        if (of & 0x800) {
+            p->flags |= 0x400;
+            p->vx /= 2.0f; p->vz /= 2.0f; p->vy = -(p->vy / 2.0f);
+            if (s->ev.spray) { float vv[3] = {p->vx, p->vy, p->vz}; s->ev.spray(s->ev.ctx, p->owner, p->type, p0, vv); }
+        } else if (of & 0x400) p->flags |= 0x200;
+        else { p->vx = -p->vx; p->vz = -p->vz; }
+    }
+    if (gy < p1[1]) { p->x = p1[0]; p->y = p1[1]; p->z = p1[2]; }
+    if (--p->life < 1) {
+        p->active = 0;
+        float at[3] = {p->x, p->y, p->z};
+        /* the effect by what it last struck: -1 the ground (0x400), -3 nothing */
+        if (s->ev.impact) s->ev.impact(s->ev.ctx, p->owner, p->type, (p->flags & 0x400) ? -1 : -3, -1, at);
+        return 1;
     }
     return 0;
 }
@@ -292,6 +395,7 @@ int combat_shots_tick(combat_shots *s, const combat_world *w)
     for (int i = 0; i < COMBAT_MAX_SHOTS; i++) {
         combat_shot *p = &s->shot[i];
         if (!p->active) continue;
+        if (p->beam) continue;
         /* guidance (0x1001aec9): the acceleration is the unit vector to the target less the unit vector of the
          * velocity (vertical only for shots not kept level, +0x7e bit 0x20); within 3000 the speed drops 5% a tick;
          * within 100 the shot strikes the target (0x8000) */
@@ -330,14 +434,18 @@ int combat_shots_tick(combat_shots *s, const combat_world *w)
         float p0[3] = {p->x, p->y, p->z};
         float p1[3] = {p->x + p->vx + p->ax * 0.5f, p->y + p->vy + p->ay * 0.5f, p->z + p->vz + p->az * 0.5f};
         p->vx += p->ax; p->vy += p->ay; p->vz += p->az;
+        if (p->motion == 3 && !strike) {
+            hits += bounce_tick(s, w, p, p0, p1);
+            continue;
+        }
         if (strike) {
             combatant *c = w->victim(w->ctx, p->target);
             float at[3] = {p->x, p->y, p->z};
             int pen = -1;
             if (c) {
                 int alive = !c->dead;
-                /* INFERRED: the zone, the torso (the shot's hit with 0x8000 isn't followed to its zone) */
-                if (combat_damage(c, p->type, p->power, 2) && s->ev.killed) s->ev.killed(s->ev.ctx, p->target, p->owner);
+                /* 0x100191d7: a strike with 0x8000 takes the vehicle's root object, its zone (+0x26) */
+                if (combat_damage(c, p->type, p->power, c->strike_zone) && s->ev.killed) s->ev.killed(s->ev.ctx, p->target, p->owner);
                 pen = alive ? c->pierced : -1;
                 if (w->hit_vehicle) w->hit_vehicle(w->ctx, p->target, p->owner);
             }
@@ -369,6 +477,55 @@ int combat_shots_tick(combat_shots *s, const combat_world *w)
             if (s->ev.impact) { float at[3] = {p->x, p->y, p->z}; s->ev.impact(s->ev.ctx, p->owner, p->type, -1, -1, at); }
         } else if (--p->life <= 0) p->active = 0;
     }
+    if (!s->beams_by_frame) hits += combat_beams_frame(s, w, 1);
+    return hits;
+}
+
+int combat_beams_frame(combat_shots *s, const combat_world *w, int ticks)
+{
+    int hits = 0;
+    for (int i = 0; i < COMBAT_MAX_SHOTS; i++) {
+        combat_shot *p = &s->shot[i];
+        if (!p->active || !p->beam) continue;
+        p->age += ticks;
+        p->life -= ticks;
+        if (p->life < 1) { p->active = 0; continue; }
+        const gear_weapon_stats *st = &gear_weapon_stat[p->type];
+        if (st->kind == 4 || st->kind == 6) p->active = 0;   /* one test */
+        if (w->beam_ray) {
+            float f[3], d[3];
+            if (!w->beam_ray(w->ctx, p->owner, p->type, f, d)) { p->active = 0; continue; }
+            float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            p->x = f[0]; p->y = f[1]; p->z = f[2];
+            if (l > 1e-6f) { p->dir[0] = d[0] / l; p->dir[1] = d[1] / l; p->dir[2] = d[2] / l; }
+        }
+        float reach = st->max_range > 0 ? st->max_range : st->speed * (float)st->life;
+        float p0[3] = {p->x, p->y, p->z};
+        float p1[3] = {p->x + p->dir[0] * reach, p->y + p->dir[1] * reach, p->z + p->dir[2] * reach};
+        float t;
+        int zone, v = w->hit(w->ctx, p->owner, p0, p1, &t, &zone);
+        /* the scene test (0x100229d9) meets the ground's tiles too: the ground cuts the ray short */
+        float tg = 2;
+        for (int k = 1; k <= 64; k++) {
+            float f = (float)k / 64.0f;
+            if (p0[1] + (p1[1] - p0[1]) * f < w->ground_y(w->ctx, p0[0] + (p1[0] - p0[0]) * f, p0[2] + (p1[2] - p0[2]) * f)) {
+                tg = (float)(k - 1) / 64.0f;
+                break;
+            }
+        }
+        float te = v >= 0 && t < tg ? t : tg < 2 ? tg : 1;
+        for (int k = 0; k < 3; k++) p->end[k] = p0[k] + (p1[k] - p0[k]) * te;
+        if (v < 0 || tg < t) continue;
+        float at[3] = {p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, p0[2] + (p1[2] - p0[2]) * t};
+        combatant *c = w->victim(w->ctx, v);
+        if (c) {
+            int alive = !c->dead;
+            if (combat_damage(c, p->type, p->power, zone) && s->ev.killed) s->ev.killed(s->ev.ctx, v, p->owner);
+            if (w->hit_vehicle) w->hit_vehicle(w->ctx, v, p->owner);
+            if (s->ev.impact) s->ev.impact(s->ev.ctx, p->owner, p->type, v, alive ? c->pierced : -1, at);
+            hits++;
+        } else if (w->hit_other) w->hit_other(w->ctx, v, p->owner, p->power);
+    }
     return hits;
 }
 
@@ -389,6 +546,21 @@ int combat_effect(int kind, unsigned flags, int cockpit)
     case 0x43: case 0x46: case 0x47: case 0x48: case 0x44: return veh ? 0x2a : flags & COMBAT_HIT_GROUND ? 0x2a : k;
     }
     return k;
+}
+
+/* 0x1001b3a1's light flag (local_68, then 0x1004b275 when the effect found a slot): kinds 1 / 2 / 6, 0x24, 0x3d /
+ * 0x40 / 0x41 / 0x42 / 0x44 / 0x45 always; 0x3b, 0x3e, 0x3f, 0x43 / 0x46 / 0x47 / 0x48 only off a vehicle and on a
+ * strike flagged 0x400 */
+int combat_effect_light(int kind, unsigned flags, int cockpit)
+{
+    int veh = (flags & COMBAT_HIT_VEHICLE) && !((flags & COMBAT_HIT_PLAYER) && cockpit);
+    switch (kind & 0xff) {
+    case 1: case 2: case 6: case 0x24: case 0x3d: case 0x40: case 0x41: case 0x42: case 0x44: case 0x45:
+        return 1;
+    case 0x3b: case 0x3e: case 0x3f: case 0x43: case 0x46: case 0x47: case 0x48:
+        return !veh && (flags & COMBAT_HIT_GROUND) != 0;
+    }
+    return 0;
 }
 
 /* 0x1001b3a1: the vehicle branches of kinds 5, 0x3b and 0x3d..0x48 lower the effect by 300 (0x100eb4a8) */

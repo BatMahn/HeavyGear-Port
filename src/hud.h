@@ -19,7 +19,9 @@ enum { HUD_RET_PROJ = 51, HUD_RET_PROJ_BUSY = 53, HUD_RET_LASER = 55, HUD_RET_LA
 enum { HUD_RADAR_FRIEND, HUD_RADAR_ENEMY, HUD_RADAR_NEUTRAL, HUD_RADAR_NAV, HUD_RADAR_NAV_SEEN };
 
 #define HUD_MAX_CONTACTS 96
-#define HUD_BOX_LINES 14
+#define HUD_MENU_MAX 8
+enum { HUD_MENU_ITEM = 5, HUD_MENU_SPACER = 3, HUD_MENU_EXIT = 6 };
+enum { HUD_MENU_SLIDER = 1, HUD_MENU_CHOICE = 2 };
 
 typedef struct {
     float heading;              /* the engine's degrees */
@@ -33,7 +35,8 @@ typedef struct {
     int   ammo[GEAR_MAX_WEAPONS], gone[GEAR_MAX_WEAPONS], selected;
     /* the message box: the current objective (NULL: none) */
     const char *obj_label, *obj_text;
-    /* a passing message ("<objective> completed / failed"; INFERRED place: the box's third line) */
+    /* the message bar's text (0x1006a0ec / 0x1006a27f: slot 0, HMESSBAR across the screen's top, e.g. "Exiting Mission
+     * Area..."), NULL none */
     const char *msg;
     /* the reticle at the aim point's projection */
     int   ret_on;
@@ -55,10 +58,26 @@ typedef struct {
     struct { float x, z; int kind; } contact[HUD_MAX_CONTACTS];
     int   tgt_contact, nav_contact;   /* index into contact[] of the target / nav, -1 none */
     float radar_range;          /* world units across the radar window */
+    int   radar_mode;           /* src/radar.h: 0 none, 1 the cockpit radar (window 0), 2 the large radar (the screen's
+                                 * middle), 4 the map (contact x / z are then 640 x 480 screen points; only the navs and
+                                 * the target / nav marks draw over the world's top-down render) */
+    int   hud_off;              /* 0x10118e90 == 0 (F11, or the map): no window draws, the message bar and warn do */
+    const char *warn;           /* 0x10056944's line (e.g. "SATELLITE UPLINK NOT FUNCTIONING"), NULL none */
     int   frame;                /* animation counter (the nav marker's frames) */
-    /* the message box opened (DISPLAY_OBJECTIVES, the radio menus): its lines replace the current objective */
-    int   box_open, nbox;
-    struct { const char *label, *text; int colour; } box[HUD_BOX_LINES];
+    /* the message box opened (0x1014cb0c: a radio menu is open, 0x10062afd) */
+    int   box_open;
+    /* the open radio menu (0x100636da in window 15): its title and items. type: HUD_MENU_ITEM an entry numbered 1..,
+     * HUD_MENU_SPACER an unnumbered row (the mission channel's), HUD_MENU_EXIT the exit entry numbered 0 */
+    const char *menu_title;
+    int   nmenu;
+    struct {
+        int type; const char *text;
+        int kind;              /* the handler's column: 0 none, HUD_MENU_SLIDER value (16.16, 0x100645c0), HUD_MENU_CHOICE
+                                * vtext (0x10064deb) */
+        int value; const char *vtext;
+    } menu[HUD_MENU_MAX];
+    int   menu_style;          /* 0 a radio channel's (window 15), 1 the escape screen's (record 5: ESCAPSCR) */
+    int   menu_sel;            /* the list's selected item (+0x10), drawn in the record's +0x50 colour */
     /* DISPLAY_OBJECTIVES (0x100b21ce, window 13): the player's group's shown objectives by category (their order
      * byte: 1, 2, 4, 0, 8), each with its state (5 done, 6 failed, else in progress), and the time line */
     int   objlist;

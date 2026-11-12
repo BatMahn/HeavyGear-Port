@@ -170,6 +170,71 @@ static int item_tree(odfs *s, int id, int bit, itree *t)
     return t->nroots ? 0 : -1;
 }
 
+/* ---- an item's picture (the list's, 0x1013804f -> 0x1013281e ... 0x101348aa; 0x1011c6c3 / 0x1011c3a9) ----
+ * The item's node tree as the picture builders make it; each node's object is placed from its parent: a root (no
+ * link) at minus the ODF's +0x118 (in memory +0x121), else at its link's offset (+0x24) less its own pivot (+0xec);
+ * an empty node sits at its parent's place and hands its link on to its children; an empty leaf is an attach point
+ * (it takes a link, no object). The k-th child takes the parent's k-th link. Objects named POF / EYE / SOL... are
+ * flagged 0x1000 and not drawn (0x1011d8bd). A pair draws its first variant (0x101348aa -> 0x1011cb18; 0x1011ce6b). */
+static float rdf32(const uint8_t *p) { int32_t v = rd32(p); float f; memcpy(&f, &v, 4); return f; }
+
+static void pic_walk(const itree *t, int i, const uint8_t *link, const float base[3], char (*model)[9],
+                     float (*pos)[3], int *n, int max)
+{
+    const inode *q = &t->n[i];
+    float at[3] = {base[0], base[1], base[2]};
+    if (q->o) {
+        const uint8_t *d = q->o->d;
+        for (int k = 0; k < 3; k++)
+            at[k] += link ? rdf32(link + 0x24 + 4 * k) - rdf32(d + 0xec + 4 * k) : -rdf32(d + 0x118 + 4 * k);
+        const char *nm = (const char *)d + 0xc;
+        if (*n < max && strncmp(nm, "POF", 3) && strncmp(nm, "EYE", 3) && strncmp(nm, "SOL", 3) && nm[0]) {
+            int k = 0;
+            for (; k < 8 && nm[k]; k++) model[*n][k] = (char)tolower((unsigned char)nm[k]);
+            model[*n][k] = 0;
+            pos[*n][0] = at[0]; pos[*n][1] = at[1]; pos[*n][2] = at[2];
+            (*n)++;
+        }
+        int li = 0;
+        for (int c = q->child; c >= 0; c = t->n[c].sib, li++) {
+            const uint8_t *l = li < q->o->nl ? d + 300 + (size_t)li * 0x48 : NULL;
+            const inode *cq = &t->n[c];
+            if (!cq->o && cq->child < 0) continue;   /* an attach point */
+            pic_walk(t, c, l, at, model, pos, n, max);
+        }
+    } else {
+        for (int c = q->child; c >= 0; c = t->n[c].sib) {
+            const inode *cq = &t->n[c];
+            if (!cq->o && cq->child < 0) continue;
+            pic_walk(t, c, link, at, model, pos, n, max);
+        }
+    }
+}
+
+int design_item_picture(hg_archive *a, int id, char (*model)[9], float (*pos)[3], int max, float place[3])
+{
+    static odfs s;
+    memset(&s, 0, sizeof s);
+    s.a = a;
+    itree t;
+    int n = 0;
+    int v = variant(id, 1);
+    if (item_tree(&s, id, 1, &t) == 0) {
+        static const float zero[3] = {0, 0, 0};
+        if (t.n[0].o) {
+            /* the root object sits at the place (0x1011d7ff): its own offset is replaced */
+            const uint8_t *d = t.n[0].o->d;
+            float b[3];
+            for (int k = 0; k < 3; k++) b[k] = rdf32(d + 0x118 + 4 * k);
+            pic_walk(&t, 0, NULL, b, model, pos, &n, max);
+        } else pic_walk(&t, 0, NULL, zero, model, pos, &n, max);
+    }
+    odfs_free(&s);
+    if (place && v >= 0 && v < SHELL_EQUIP_IDS)
+        for (int k = 0; k < 3; k++) place[k] = shell_equip_view[v][k];
+    return n;
+}
+
 /* ---- loading ---- */
 
 int design_load(design *g, hg_archive *a, const char *gdf)

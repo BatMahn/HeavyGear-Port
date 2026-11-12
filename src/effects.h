@@ -36,6 +36,8 @@ typedef struct {
     /* an explosion's harm (0x1001c75c / 0x1001c96a): to what is within `radius` (plus its own size) of the point,
      * `power` (already times the ticks); vehicles only when `vehicles` */
     void (*splash)(void *ctx, int owner, float x, float y, float z, float radius, float power, int vehicles);
+    /* optional: a vehicle's yaw (degrees), for muzzle flashes fixed to it (NULL: they keep their turn) */
+    int  (*vehicle_yaw)(void *ctx, int unit, float *deg);
 } effects_ops;
 
 typedef struct {
@@ -43,6 +45,8 @@ typedef struct {
     float x, y, z;
     int   left, age;
     int   body;            /* debris in flight (0x107f74a0's bodies) */
+    int   mount;           /* a muzzle flash fixed to vehicle `mount` (0x100bd13f), -1 none */
+    float mo[3], myaw;     /* its offset from that vehicle's origin, and the vehicle's yaw, at the start */
     float v[3], w[3], m[9], r;   /* w: the turn a tick about x, y, z (degrees); m: the orientation */
 } fx_slot;
 
@@ -69,9 +73,15 @@ int  effects_start(effects *fx, int type, float x, float y, float z, int follow)
 int  effects_debris(effects *fx, float x, float y, float z, int n);
 /* a destroyed gear's burning (0x100533d2): 0x712 ticks of bursts and debris about (x, y, z) */
 void effects_wreck(effects *fx, float x, float y, float z);
+/* a muzzle flash (types 0x17..0x21, not 0x4c) at the firing vehicle's weapon: the original hangs the effect object on
+ * the weapon's mount (0x100bd13f, through 0x10130718 the firer), so it moves and turns with the vehicle while it lasts.
+ * Other types start as effects_start. */
+int  effects_start_on(effects *fx, int type, float x, float y, float z, int vehicle);
 /* the running effects' harm for a frame of `dt` ticks (0x1001c40d, before their lives count down): types with the
  * table's +0x18, radius by type (0x16: its age x 4, 0x2c: x 16, else the model's size), power dt x +0x20 */
 void effects_splash(effects *fx, int dt);
+/* the option at 0x1014a564 + 2 (the options screen's): every splash effect harms vehicles */
+void effects_set_splash_all(effects *fx, int on);
 /* run the effects `dt` ticks on */
 void effects_tick(effects *fx, int dt);
 /* how many are running */

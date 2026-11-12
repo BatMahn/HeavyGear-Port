@@ -1,3 +1,4 @@
+#include "radio.h"
 #include "sfx.h"
 
 #include "audio.h"
@@ -95,7 +96,9 @@ void sfx_listener(float x, float y, float z, float heading)
 
 int sfx_flat(const char *name, int vol, int pan, unsigned flags)
 {
+    sound_reg_id(name);
     int i = get_index(name);
+    vol = audio_level_db(vol, audio_level(SNDCFG_FX));   /* 0x1000825f: the effects' level (0x10108c24) */
     if (i < 0 || !S.c[i].ok || vol < -6000) return 0;
     if (vol > 0) vol = 0;
     if (getenv("HG_SNDLOG")) fprintf(stderr, "sfx %s vol %d pan %d\n", name, vol, pan);
@@ -122,9 +125,13 @@ static int place(float dx, float dy, float dz, int quiet, int *vol, int *pan, in
 
 int sfx_at(const char *name, float x, float y, float z, int quiet, unsigned flags)
 {
+    sound_reg_id(name);
     int i = get_index(name);
     int vol, pan, delay;
     if (i < 0 || !S.c[i].ok || !place(S.lx - x, S.ly - y, S.lz - z, quiet, &vol, &pan, &delay)) return 0;
+    vol = audio_level_db(vol, audio_level(SNDCFG_FX));
+    if (vol < -6000) return 0;
+    if (vol > 0) vol = 0;
     if (getenv("HG_SNDLOG")) fprintf(stderr, "sfx %s at vol %d pan %d delay %d ms\n", name, vol, pan, delay);
     return start(i, audio_db(vol), pan, flags & 0x2000 ? 0 : delay, flags);
 }
@@ -133,10 +140,75 @@ void sfx_move(int voice, float x, float y, float z, int quiet)
 {
     int vol, pan, delay;
     if (!place(S.lx - x, S.ly - y, S.lz - z, quiet, &vol, &pan, &delay)) { vol = -10000; pan = 0; }
+    else { vol = audio_level_db(vol, audio_level(SNDCFG_FX)); if (vol > 0) vol = 0; if (vol < -6000) vol = -10000; }
     audio_adjust(voice, audio_db(vol), pan);
 }
 
 void sfx_stop(int voice) { audio_stop(voice); }
+
+/* 0x100087d8: the first channel playing the sound is stopped (state 3: Stop, Release) */
+void sfx_stop_name(const char *name)
+{
+    int i = get_index(name);
+    if (i < 0) return;
+    for (int k = 1; k < SFX_CHANNELS; k++)
+        if (S.ch[k].voice && S.ch[k].snd == i && audio_playing(S.ch[k].voice)) {
+            audio_stop(S.ch[k].voice);
+            S.ch[k].voice = 0;
+            return;
+        }
+}
+
+/* 0x100084f1: every channel playing the sound takes the frequency (SetFrequency) */
+void sfx_rate_name(const char *name, int hz)
+{
+    int i = get_index(name);
+    if (i < 0) return;
+    for (int k = 1; k < SFX_CHANNELS; k++)
+        if (S.ch[k].voice && S.ch[k].snd == i && audio_playing(S.ch[k].voice)) audio_set_rate(S.ch[k].voice, hz);
+}
+
+/* ---- the gear's motion sounds (HGSIM; all for the player's vehicle only) ---- */
+
+void sfx_footstep(float x, float y, float z, int quiet)
+{
+    sfx_at("AFXHGWKL", x, y, z, quiet, 0x32);
+}
+
+void sfx_skate_engage(void) { sfx_flat("AFXHGWEN", -2000, 0, 0x50); }
+void sfx_skate_run(void) { sfx_flat("AFXHGWHE", -2000, 0, 0x2000 | 0x150); }
+void sfx_skate_speed(float speed) { sfx_rate_name("AFXHGWHE", (int)(speed * 200.0f + 13538.0f)); }
+void sfx_skate_stop(void)
+{
+    sfx_stop_name("AFXHGWHE");
+    sfx_flat("AFXHGWDE", -2000, 0, 0x50);
+}
+
+void sfx_jump_burn(void)
+{
+    sfx_flat("AFXHGJJT", 0, 0, 0x2000 | 0x150);
+    sfx_flat("AFXHGJJF", 0, 0, 0x32);
+}
+void sfx_jump_burn_end(void) { sfx_stop_name("AFXHGJJT"); }
+
+void sfx_fall(void) { sfx_flat("AFXHGFLS", -1000, 0, 0x50); }
+
+void sfx_landing(float x, float y, float z, float speed, int quiet)
+{
+    sfx_at(speed <= 140.0f ? "AFXHGJLR" : "AFXHGCOO", x, y, z, quiet, 0x32);
+}
+
+void sfx_bump(float speed)
+{
+    if (speed > 25.0f) speed = 25.0f;
+    sfx_flat("AFXHGCOO", (int)(-10000.0f * speed / 150.0f / 6.0f), 0, 0x32);
+}
+
+void sfx_laser_loop(int on)
+{
+    if (on) sfx_flat("AFXWLLLC", -1000, 0, 0x2000 | 0x150);
+    else sfx_stop_name("AFXWLLLC");
+}
 int  sfx_playing(int voice) { return audio_playing(voice); }
 
 void sfx_listener_pos(float *x, float *y, float *z) { *x = S.lx; *y = S.ly; *z = S.lz; }

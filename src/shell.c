@@ -1,12 +1,15 @@
 #include "shell.h"
 
+#include "garagepic.h"
 #include "modelview.h"
 
+#include "barracks.h"
 #include "brf.h"
 #include "pcx.h"
 #include "shell_picture.h"
 #include "shell_tables.h"
 #include "shp.h"
+#include "bytes.h"
 #include "smk.h"
 #include "fsutil.h"
 
@@ -62,19 +65,33 @@ struct shell {
     hg_font     font[SHELL_FONTS];
     int         font_tried[SHELL_FONTS];
     int         mission;    /* campaign table entry */
+    float       own_front[19];  /* the game's own front line (FUN_10112881 outside the story) */
+    int         has_own_front, own_front_gen;
     hg_brf      brf;
     int         has_brf;
     int         outcome;        /* the last mission's: 2 accomplished, 1 failed, -1 none */
     front_map   map5, map62;    /* B05's (B05_BASE ...) and the situation screen's (B62_BASE ...) */
     hg_shape    mapov;          /* B05MAPOV, the map's frame */
     int         mapov_tried;
+    front_map   map16;          /* training's (B16_BASE ...), its frame B16MAPOV (src/modes) */
+    hg_shape    mapov16;
+    int         mapov16_tried;
+    shell_barracks *bar;        /* the barracks' contents (src/barracks.h), NULL none */
+    struct { int rec, is_pcx; hg_pcx pcx; hg_shape shp; } pic[48];   /* pictures drawn by record (draw_rec) */
+    int         npic;
+    struct { char stem[16]; char text[48]; } spin[16];   /* spinners' current items (shell_set_spinner) */
+    int         nspin;
+    const char *credits;        /* the credits' text (B67) and its scroll, pixels up from the start */
+    int         credits_dy;
     layer       lay[2];         /* the screen and a popup over it */
     int         nlay;
     shell_list  list[SHELL_MAX_LISTS];
     int         nlist;
     struct { int on, x0, y0, x1, y1, max, cursor; char text[64]; } edit;
     struct { int on, x0, y0, x1, y1; char text[512]; } box;
-    char        hidden[4][9];   /* buttons not shown (FUN_1000fdec: the button's +0x88) */
+    struct { int on, x0, y0, x1, y1; char text[64]; } tbox[SHELL_TBOXES];   /* more FUN_100140a7 boxes */
+    struct { int on, x0, y0, x1, y1, colour; char text[1024]; } area[SHELL_AREAS];   /* shell_area_set */
+    char        hidden[16][9];   /* buttons not shown (FUN_1000fdec: the button's +0x88) */
     int         nhidden;
     char        disabled[16][9];  /* buttons disabled (the control's +0x48 / +0x4c): their D art, no clicks */
     int         ndisabled;
@@ -87,6 +104,7 @@ struct shell {
     shell_anim  anim[8];
     char        stats[256];
     char        objtext[2048];
+    debrief_list score;
     /* the briefing's squad panel (shell_set_squad) */
     char        sq_name[2][32], sq_gear[3][32];
     int         sq_face[2];
@@ -98,12 +116,21 @@ struct shell {
     char        g_cat[9];
     char        g_item[40][256];
     int         g_n;
+    int         g_ids[40];    /* the items' equipment ids (shell_garage_ids), -1 unknown */
+    garagepic  *g_pics;
+    uint64_t    g_spin_t;     /* the list's turner's last time (0: stopped) */
+    char        g_prty[40];   /* the statistics panel (shell_garage_panel) */
+    char        g_weap[16][8];
+    int         g_wcol[16], g_nweap;
+    char        g_stats[256];
     char        g_gear[32];
     char        g_gdf[2];
     modelview  *g_view;
     float       g_place[3], g_turn;
     modelview  *b_view;               /* the briefing's gear (FUN_1008f28f's view) */
     int         b_has;
+    int         b_dark;               /* the gear's tech is over the game's level (+0xb8 > +0xbc) */
+    uint64_t    b_blink;              /* when the launch button's hover began (its 400 ms timer, 0x10094d2e) */
     float       b_place[3], b_turn;
     char        b_weap[16][12];
     int         b_nweap;
@@ -282,6 +309,8 @@ static void free_widgets(shell *s)
     s->nlist = 0;
     s->edit.on = 0;
     s->box.on = 0;
+    memset(s->tbox, 0, sizeof s->tbox);
+    for (int i = 0; i < SHELL_AREAS; i++) s->area[i].on = 0;
 }
 
 static void free_screen(shell *s)
@@ -315,10 +344,15 @@ void shell_close(shell *s)
     for (int i = 0; i < SHELL_FONTS; i++) fnt_free(&s->font[i]);
     for (int i = 0; i < 2; i++) if (s->sq_pcx_for[i]) pcx_free(&s->sq_pcx[i]);
     modelview_close(s->g_view);
+    garagepic_close(s->g_pics);
     modelview_close(s->b_view);
     map_free(&s->map5);
     map_free(&s->map62);
     shp_free(&s->mapov);
+    map_free(&s->map16);
+    shp_free(&s->mapov16);
+    free(s->bar);
+    for (int i = 0; i < s->npic; i++) { if (s->pic[i].is_pcx) pcx_free(&s->pic[i].pcx); else shp_free(&s->pic[i].shp); }
     free(s);
 }
 
@@ -486,17 +520,18 @@ static const uint8_t *map_pixels(shell *s, front_map *m, const char *base, const
     }
     if (!m->ok) return NULL;
     int e = s->mission >= 0 && s->mission < SHELL_CAMPAIGN ? s->mission : 0;
-    if (m->px && m->front == e) return m->px;
+    int key = s->has_own_front ? 1000 + s->own_front_gen : e;
+    if (m->px && m->front == key) return m->px;
     int W = m->base.w, H = m->base.h;
     free(m->px);
     m->px = malloc((size_t)W * H);
     if (!m->px) return NULL;
     memcpy(m->px, m->base.px, (size_t)W * H);
-    m->front = e;
+    m->front = key;
     /* the front line's heights, clamped to 0..1 */
     float ys[19];
     for (int i = 0; i < 19; i++) {
-        float v = shell_front[e][i];
+        float v = s->has_own_front ? s->own_front[i] : shell_front[e][i];
         ys[i] = v >= 0.0f ? (v <= 1.0f ? v : 1.0f) : 0.0f;
     }
     /* each column: t, the line's height there (linear between the table's x positions); the north map down to
@@ -557,6 +592,20 @@ int shell_set_mission(shell *s, int entry)
     return s->has_brf ? 0 : -1;
 }
 
+void shell_set_front(shell *s, const float *ys)
+{
+    s->has_own_front = ys != NULL;
+    if (ys) memcpy(s->own_front, ys, sizeof s->own_front);
+    s->own_front_gen = (s->own_front_gen + 1) % 1000;
+}
+
+void shell_set_brf(shell *s, int entry, const struct hg_brf_s *b)
+{
+    s->mission = entry;
+    s->brf = *b;
+    s->has_brf = 1;
+}
+
 const struct hg_brf_s *shell_brf(const shell *s)
 {
     return s->has_brf ? &s->brf : NULL;
@@ -587,6 +636,11 @@ void shell_set_briefing_gear(shell *s, const unsigned char *gdf, size_t len, con
     for (int i = 0; i < nweapons && i < 16; i++) snprintf(s->b_weap[s->b_nweap++], sizeof s->b_weap[0], "%s", weapons[i]);
 }
 
+void shell_briefing_gear_dark(shell *s, int dark)
+{
+    s->b_dark = dark;
+}
+
 void shell_briefing_gear_turn(shell *s, float turn)
 {
     s->b_turn = turn;
@@ -597,11 +651,39 @@ void shell_set_garage(shell *s, const char *cat, const char *const *items, int n
 {
     snprintf(s->g_cat, sizeof s->g_cat, "%s", cat ? cat : "");
     s->g_n = 0;
-    for (int i = 0; i < n && i < 40; i++) snprintf(s->g_item[s->g_n++], sizeof s->g_item[0], "%s", items[i]);
+    for (int i = 0; i < n && i < 40; i++) { s->g_ids[s->g_n] = -1; snprintf(s->g_item[s->g_n++], sizeof s->g_item[0], "%s", items[i]); }
     snprintf(s->g_gear, sizeof s->g_gear, "%s", gear ? gear : "");
     s->g_gdf[0] = gdf && len ? 1 : 0;
     if (!s->g_view) s->g_view = modelview_open(s->a);
     if (s->g_view && gdf) modelview_set_data(s->g_view, gdf, len, extra);
+}
+
+void shell_garage_spin(shell *s, int on, const int *ids, int n, int dragged, uint64_t ms)
+{
+    if (!on) { s->g_spin_t = 0; return; }
+    if (!s->g_spin_t) { s->g_spin_t = ms ? ms : 1; return; }
+    float deg = 3.0f * (float)(ms - s->g_spin_t) / 50.0f;
+    s->g_spin_t = ms;
+    if (!s->g_pics) s->g_pics = garagepic_open(s->a);
+    for (int i = 0; i < n; i++) if (ids[i] != dragged) garagepic_turn(s->g_pics, ids[i], deg);
+}
+
+void shell_garage_panel(shell *s, const char *priority, const char *const *weapons, const int *colour, int n,
+                        const char *stats)
+{
+    snprintf(s->g_prty, sizeof s->g_prty, "%s", priority ? priority : "");
+    s->g_nweap = 0;
+    for (int i = 0; i < n && i < 16; i++) {
+        snprintf(s->g_weap[i], sizeof s->g_weap[0], "%s", weapons[i]);
+        s->g_wcol[i] = colour[i];
+        s->g_nweap++;
+    }
+    snprintf(s->g_stats, sizeof s->g_stats, "%s", stats ? stats : "");
+}
+
+void shell_garage_ids(shell *s, const int *ids, int n)
+{
+    for (int i = 0; i < s->g_n; i++) s->g_ids[i] = ids && i < n ? ids[i] : -1;
 }
 
 void shell_garage_view(shell *s, const float place[3], float turn)
@@ -647,6 +729,12 @@ int shell_garage_pick(shell *s, int x, int y)
 void shell_set_objectives(shell *s, const char *text)
 {
     snprintf(s->objtext, sizeof s->objtext, "%s", text ? text : "");
+}
+
+void shell_set_score(shell *s, const debrief_list *l)
+{
+    if (l) s->score = *l;
+    else memset(&s->score, 0, sizeof s->score);
 }
 
 void shell_set_stats(shell *s, const char *text)
@@ -755,6 +843,7 @@ void shell_popup_close(shell *s)
     s->nlay = 1;
     s->edit.on = 0;
     s->box.on = 0;
+    memset(s->tbox, 0, sizeof s->tbox);
 }
 
 const char *shell_screen(const shell *s)
@@ -789,6 +878,8 @@ int shell_list_set(shell *s, const char *name, const char *const *items, int n, 
         int r = find_rec(name);
         const element *e = r >= 0 ? find_el(s, r) : NULL;
         int in = r >= 0 ? find_child(r, "INNR") : -1, bar = r >= 0 ? find_child(r, "SLCT") : -1;
+        if (r >= 0 && in < 0) in = find_child(r, "INNER");   /* B16INNER */
+        if (r >= 0 && bar < 0) bar = find_child(r, "SELCT");  /* B16SELCT */
         if (!e || in < 0 || bar < 0 || s->nlist >= SHELL_MAX_LISTS) return -1;
         l = &s->list[s->nlist++];
         memset(l, 0, sizeof *l);
@@ -865,6 +956,25 @@ void shell_char(shell *s, int ch)
     s->edit.cursor++;
 }
 
+int shell_tbox_set(shell *s, int k, int x0, int y0, int x1, int y1, const char *text)
+{
+    if (k < 0 || k >= SHELL_TBOXES) return -1;
+    s->tbox[k].on = text != NULL;
+    s->tbox[k].x0 = x0; s->tbox[k].y0 = y0; s->tbox[k].x1 = x1; s->tbox[k].y1 = y1;
+    snprintf(s->tbox[k].text, sizeof s->tbox[k].text, "%s", text ? text : "");
+    return 0;
+}
+
+int shell_area_set(shell *s, int slot, int x0, int y0, int x1, int y1, int colour, const char *text)
+{
+    if (slot < 0 || slot >= SHELL_AREAS) return -1;
+    s->area[slot].on = text != NULL;
+    s->area[slot].x0 = x0; s->area[slot].y0 = y0; s->area[slot].x1 = x1; s->area[slot].y1 = y1;
+    s->area[slot].colour = colour;
+    snprintf(s->area[slot].text, sizeof s->area[slot].text, "%s", text ? text : "");
+    return 0;
+}
+
 int shell_box_set(shell *s, int x0, int y0, int x1, int y1, const char *text)
 {
     s->box.on = 1;
@@ -883,7 +993,17 @@ static int is_hidden(const shell *s, const char *stem)
 
 void shell_hide(shell *s, const char *stem)
 {
-    if (s->nhidden < 4 && !is_hidden(s, stem)) snprintf(s->hidden[s->nhidden++], sizeof s->hidden[0], "%s", stem);
+    if (s->nhidden < 16 && !is_hidden(s, stem)) snprintf(s->hidden[s->nhidden++], sizeof s->hidden[0], "%s", stem);
+}
+
+void shell_show(shell *s, const char *stem)
+{
+    for (int i = 0; i < s->nhidden; i++)
+        if (!strcmp(s->hidden[i], stem)) {
+            memmove(s->hidden[i], s->hidden[i + 1], (size_t)(s->nhidden - i - 1) * sizeof s->hidden[0]);
+            s->nhidden--;
+            return;
+        }
 }
 
 static int is_disabled(const shell *s, const char *stem)
@@ -1053,6 +1173,59 @@ static int text_height(shell *s, int fi, int width, const char *str)
     return lines * f->height;
 }
 
+/* right-aligned text in a rectangle (FUN_10033284): lines break as text_left's; each starts at x1 + 1 minus the
+ * width up to the character that overflowed */
+static void text_right(shell *s, uint32_t *out, int fi, uint8_t colour, int x0, int y0, int x1, int y1, const char *str)
+{
+    const hg_font *f = font(s, fi);
+    if (!f || !str) return;
+    int width = x1 - x0 + 1, lw = text_width(s, fi, str);
+    if (lw <= width && !strchr(str, '\n')) { draw_string(s, out, f, colour, x1 + 1 - lw, y0, x0, y0, x1, y1, str); return; }
+    text_left(s, out, fi, colour, x0, y0, x1, y1, str);
+}
+
+/* the debriefing's score list (HGSHELL FUN_100b9a09 at (29, 95)-(321, 309), font 9, colour 0xfe; drawn by 0x100b9fad):
+ * its columns (B06 builder FUN_1013ee54: 0x101e1426 / 0x101e144f / 0x101e1478, from the control's corner) x 0 - 20
+ * "-", 21 - 241 the objective's text, 220 - 284 its points, right-aligned. "Complete" then "Incomplete" (with "In
+ * Progress", never filled, first): a heading in the full width as tall as its first item's text (wrapped in 220,
+ * FUN_100b9d6a), the items each as tall as their text, half a line after each group; then Mission Bonus, Kill Bonus,
+ * Death Penalty, Mission Total and Career Total a line each, labels in 0 - 241, points in 220 - 284; only when the
+ * list has items (FUN_10026e5a) */
+static void draw_score(shell *s, uint32_t *out, const debrief_list *l)
+{
+    const hg_font *f = font(s, 9);
+    if (!f || !l->valid) return;
+    const int x0 = 29, y0 = 95, x1 = 321, y1 = 309, rowh = f->height;
+    const int c0a = x0, c0b = x0 + 20, c1a = x0 + 21, c1b = x0 + 241, c2a = x0 + 220, c2b = x0 + 284;
+    static const char *const head[3] = {"In Progress", "Complete", "Incomplete"};
+    static const int order[3] = {0, 2, 1};
+    int y = y0;
+    char num[16];
+    for (int g = 0; g < 3; g++) {
+        int any = 0;
+        for (int i = 0; i < l->n; i++) {
+            if (l->item[i].cat != order[g]) continue;
+            int h = text_height(s, 9, c1b - c1a, l->item[i].text);
+            if (!any) { text_left(s, out, 9, 0xfe, x0, y, x1, y + h, head[g]); y += h; any = 1; }
+            text_left(s, out, 9, 0xfe, c0a, y, c0b, y + h, "-");
+            text_left(s, out, 9, 0xfe, c1a, y, c1b, y + h, l->item[i].text);
+            snprintf(num, sizeof num, "%d", l->item[i].value);
+            text_right(s, out, 9, 0xfe, c2a, y, c2b, y + h, num);
+            y += h;
+        }
+        if (any) y += rowh / 2;
+    }
+    if (l->n <= 0) return;
+    const char *lab[5] = {"Mission Bonus", "Kill Bonus", "Death Penalty", "Mission Total", "Career Total"};
+    int val[5] = {l->bonus, l->kill_bonus, l->death_penalty, l->total, l->career};
+    for (int k = 0; k < 5; k++, y += rowh) {
+        text_left(s, out, 9, 0xfe, c0a, y, c1b, y + rowh, lab[k]);
+        snprintf(num, sizeof num, "%d", val[k]);
+        text_right(s, out, 9, 0xfe, c2a, y, c2b, y + rowh, num);
+    }
+    (void)y1;
+}
+
 /* FUN_1000364b: the selected item in the selection bar, centred in its height; the items before it upward from
  * the bar's top, the items after it downward from its bottom, all clipped to the inner area */
 static void draw_list(shell *s, uint32_t *out, const shell_list *l)
@@ -1075,6 +1248,145 @@ static void draw_list(shell *s, uint32_t *out, const shell_list *l)
     }
 }
 
+void shell_set_spinner(shell *s, const char *stem, const char *text)
+{
+    int i = 0;
+    while (i < s->nspin && strcmp(s->spin[i].stem, stem)) i++;
+    if (i == s->nspin) {
+        if (s->nspin >= 16) return;
+        s->nspin++;
+        snprintf(s->spin[i].stem, sizeof s->spin[i].stem, "%s", stem);
+    }
+    snprintf(s->spin[i].text, sizeof s->spin[i].text, "%s", text ? text : "");
+}
+
+void shell_set_credits(shell *s, const char *text, int dy)
+{
+    s->credits = text;
+    s->credits_dy = dy;
+}
+
+void shell_set_barracks(shell *s, const shell_barracks *b)
+{
+    if (!b) { free(s->bar); s->bar = NULL; return; }
+    if (!s->bar) s->bar = malloc(sizeof *s->bar);
+    if (s->bar) *s->bar = *b;
+}
+
+/* a picture record drawn at (x, y) as FUN_10030af3 draws it (the rectangle's corner; a shape at its box) */
+static void draw_rec(shell *s, uint32_t *out, int rec, int x, int y)
+{
+    if (rec < 0 || rec >= SHELL_PICTURES) return;
+    int i = 0;
+    while (i < s->npic && s->pic[i].rec != rec) i++;
+    if (i == s->npic) {
+        if (s->npic >= 48) return;
+        memset(&s->pic[i], 0, sizeof s->pic[i]);
+        s->pic[i].rec = rec;
+        s->npic++;
+        const shell_picture *p = &shell_pictures[rec];
+        if (!strcmp(p->ext, "PCX")) { s->pic[i].is_pcx = 1; load_pcx(s->a, p->name, &s->pic[i].pcx); }
+        else {
+            size_t len;
+            uint8_t *d = hga_load(s->a, p->name, p->ext, &len, NULL);
+            if (d) shp_parse(d, len, 0, &s->pic[i].shp);
+            free(d);
+        }
+    }
+    if (s->pic[i].is_pcx) {
+        if (s->pic[i].pcx.px)
+            blit_idx(out, (const uint8_t (*)[3])s->pal, s->pic[i].pcx.px, NULL, s->pic[i].pcx.w, s->pic[i].pcx.h, x, y, 0, 0);
+    } else draw_shape(s, out, &s->pic[i].shp, x, y);
+}
+
+/* the other modes' screens: training (B16, FUN_10147d38) and its debriefing (B17, FUN_10148c3b) */
+static void draw_modes(shell *s, uint32_t *out, const char *scr)
+{
+    if (!strcmp(scr, "B16UNDER")) {
+        /* the front-line map in (341, 61)-(611, 330) under B16MAPOV (FUN_1008994f with B16_BASE / B16NORTH /
+         * B16SOUTH, the record 0x101e3df3); the briefing's summary in B16BRIEF's (33, 228)-(296, 358), font 9, colour
+         * 0xfe (FUN_10072e2f, the record 0x101e3bde) */
+        draw_map(s, out, &s->map16, "B16_BASE", "B16NORTH", "B16SOUTH", 341, 61);
+        if (!s->mapov16_tried) {
+            s->mapov16_tried = 1;
+            size_t len;
+            uint8_t *d = hga_load(s->a, "B16MAPOV", "SHP", &len, NULL);
+            if (d) shp_parse(d, len, 0, &s->mapov16);
+            free(d);
+        }
+        draw_shape(s, out, &s->mapov16, 341, 61);
+        if (s->has_brf) text_left(s, out, 9, 0xfe, 33, 228, 296, 358, s->brf.summary);
+    } else if (!strcmp(scr, "B17UNDER") && s->has_brf && s->outcome >= 0) {
+        /* FUN_100e2610 with B17STTUS (56, 47)-(293, 68), B17STATS (28, 344)-(320, 420), B17AFTER (360, 53)-(612, 416)
+         * (0x101e3f3b / 64 / 8d), font 9, colour 0xfe, as B06's; the score list FUN_100b9a09 at B06OBJCT
+         * (29, 95)-(321, 309) */
+        int k = s->outcome == 2 ? 0 : 1;
+        if (s->brf.ndebrief > k) {
+            text_center(s, out, 9, 0xfe, 56, 47, 293, 68, s->brf.debrief[k].title);
+            text_left(s, out, 9, 0xfe, 360, 53, 612, 416, s->brf.debrief[k].text);
+        }
+        if (s->objtext[0]) text_left(s, out, 9, 0xfe, 29, 95, 321, 309, s->objtext);
+        if (s->stats[0]) text_left(s, out, 9, 0xfe, 28, 344, 320, 420, s->stats);
+    } else if (!strcmp(scr, "B64UNDER")) {
+        /* the spinners (FUN_100122e5, drawn by 0x10012c4d): the current item centred (FUN_10033a59) in the spinner's
+         * inner rectangle (its "INR" child, relative to its "SPN" picture), moved down by (height - the font's) / 2;
+         * font 9, colour 0xfe */
+        const hg_font *f = font(s, 9);
+        for (int i = 0; f && i < s->nspin; i++) {
+            char n[24];
+            snprintf(n, sizeof n, "%sSPN", s->spin[i].stem);
+            int r = find_rec(n);
+            int in = r >= 0 ? find_child(r, "INR") : -1;
+            if (in < 0) continue;
+            const shell_picture *pr = &shell_pictures[r], *pi = &shell_pictures[in];
+            int x0 = pr->x0 + pi->x0, y0 = pr->y0 + pi->y0, x1 = pr->x0 + pi->x1, y1 = pr->y0 + pi->y1;
+            int off = ((y1 - y0) - f->height) / 2;
+            text_center(s, out, 9, 0xfe, x0, y0 + off, x1, y1, s->spin[i].text);
+        }
+    } else if (!strcmp(scr, "B67UNDER") && s->credits) {
+        /* the credits (FUN_10169569: FUN_10010ac0 at B67_TEXT (140, 30), inner (0, 0)-(360, 449), font 9, colour
+         * 0xfe): the text starts under the inner area (0x10010bd9) and a 20 ms timer moves it 2 up (0x10010c88);
+         * each line centred (FUN_1003420a) */
+        const hg_font *f = font(s, 9);
+        if (f) {
+            int y = 30 + 449 - s->credits_dy;
+            const char *p = s->credits;
+            while (*p) {
+                const char *e = strchr(p, '\n');
+                size_t n = e ? (size_t)(e - p) : strlen(p);
+                char line[128];
+                snprintf(line, sizeof line, "%.*s", (int)(n < 127 ? n : 127), p);
+                if (y + f->height > 30 && y < 30 + 449) text_center(s, out, 9, 0xfe, 140, y, 500, y + f->height, line);
+                y += f->height;
+                p += n;
+                if (*p) p++;
+            }
+        }
+    } else if (!strcmp(scr, "B03UNDER") && s->bar) {
+        /* the barracks (FUN_1013ae22, src/barracks.h) */
+        const shell_barracks *b = s->bar;
+        if (b->rank_pic >= 0) draw_rec(s, out, b->rank_pic, 42, 141);
+        draw_rec(s, out, 0x4b, 42, 239);
+        for (int i = 0; i < b->nmedal; i++) {
+            const shell_picture *pr = &shell_pictures[b->medal_pic[i] + 1], *pt = &shell_pictures[b->medal_pic[i] + 2];
+            draw_rec(s, out, b->medal_pic[i], pr->x0, pr->y0);
+            char n[16];
+            snprintf(n, sizeof n, "%d", b->medal_n[i]);
+            text_left(s, out, 9, 0xfe, pt->x0, pt->y0, pt->x1 > pt->x0 ? pt->x1 : pt->x0 + 40, pt->y1 > pt->y0 ? pt->y1 : pt->y0 + 20, n);
+        }
+        draw_rec(s, out, 0x4d, 322, 46);
+        text_left(s, out, 9, 0xfe, 322, 46, 617, 194, b->ai);
+        text_left(s, out, 9, 0xfe, 26, 54, 286, 219, b->stats);
+        /* the unit list (FUN_1000f034): its background B03ULIST, the item's insignia at (7, 0) and its text in
+         * (7, 0)-(227, 140), font 7 */
+        draw_rec(s, out, 0x53, 328, 230);
+        if (b->unit_sel >= 0 && b->unit_sel < b->nunit) {
+            draw_rec(s, out, b->unit_pic[b->unit_sel], 328 + 7, 230);
+            text_left(s, out, 7, 0xfe, 328 + 7, 230, 328 + 227, 230 + 140, b->unit_text[b->unit_sel]);
+        }
+    }
+}
+
 void shell_draw(shell *s, uint32_t *out)
 {
     for (int i = 0; i < 640 * 480; i++) out[i] = 0xff000000u;
@@ -1092,6 +1404,7 @@ void shell_draw(shell *s, uint32_t *out)
         draw_layer(s, out, &s->lay[0], s->nlay == 1 ? hover : NULL, 0);
     }
     draw_anims(s, out);
+    draw_modes(s, out, scr);
     if (!strcmp(scr, "B05UNDER")) {
         /* the briefing (FUN_1013c185): the front-line map in (38, 191)-(308, 460) under its frame B05MAPOV
          * (FUN_1008994f, FUN_10089b18); the mission summary in DEVDDEUT (font 9), colour 0xfe, in (353, 195)-(619, 365)
@@ -1113,12 +1426,23 @@ void shell_draw(shell *s, uint32_t *out)
         /* the player's gear (FUN_1008f28f's view at (383, 38)-(506, 127), FUN_1008f502): the model, then its weapons'
          * short names (0x101aff98 + id x 0xaa, through the language table 0x1018c0e5) for its equipment records of
          * types 5..10, from the rectangle's top left in font 9, colour 0xfe, a line each: the font's height, or the
-         * rectangle's height / their count when they wouldn't fit. Not done: the gear above the game's level (its
-         * tech, +0xb8, over +0xbc), drawn dark (ambient 5) under the message in 0x1024db40 */
+         * rectangle's height / their count when they wouldn't fit. A gear above the game's level (its tech, +0xb8,
+         * 0x1005bb6d, over +0xbc, 0x1011238e(0)) is drawn with ambient 5 and, instead of the names, "Your combat
+         * priority is too low to use this gear." (0x1024db40) centred in the rectangle (FUN_10033a59), colour 0xfe,
+         * or 7 while +0xc0 is set: B05's action 0x10094b70 on the launch button (409, 439)-(519, 476) toggles it on a
+         * 400 ms timer (id 0x17) while the mouse is over the button and clears it when it leaves (0x10094d2e) */
         if (s->b_has) {
+            if (s->b_dark) modelview_set_ambient(s->b_view, 5);
             modelview_draw(s->b_view, out, (const uint8_t (*)[3])s->pal, 383, 38, 506, 127, s->b_place, s->b_turn);
+            if (s->b_dark) modelview_set_ambient(s->b_view, 45);
             const hg_font *bf = font(s, 9);
-            if (bf && s->b_nweap > 0) {
+            if (s->b_dark) {
+                int over = s->mx >= 409 && s->mx <= 519 && s->my >= 439 && s->my <= 476;
+                if (!over) s->b_blink = 0;
+                else if (!s->b_blink) s->b_blink = s->now ? s->now : 1;
+                int on = over && ((s->now - s->b_blink) / 400) % 2 == 1;
+                text_center(s, out, 9, on ? 7 : 0xfe, 383, 38, 506, 127, "Your combat priority is too low to use this gear.");
+            } else if (bf && s->b_nweap > 0) {
                 int lh = bf->height, h = 127 - 38 + 1;
                 if (s->b_nweap * lh > h) lh = h / s->b_nweap;
                 for (int i = 0, y = 38; i < s->b_nweap; i++, y += lh) text_left(s, out, 9, 0xfe, 383, y, 506, 127, s->b_weap[i]);
@@ -1163,11 +1487,18 @@ void shell_draw(shell *s, uint32_t *out)
                 hg_shape ic = {0};
                 size_t len;
                 uint8_t *d = hga_load(s->a, b->marker[i].icon, "SHP", &len, NULL);
+                /* FUN_10034d31 (SHP: 0x10183ddb): frame 0's first dword, its high word the label's x offset and its
+                 * low word the bottom's y offset (the frame's canvas width - 1 / height - 1, not its drawn box) */
+                int dw = 0, dh = 0;
+                if (d && len >= 12) {
+                    uint32_t fo = rd_u32(d + 8);
+                    if (fo + 4 <= len) { uint32_t f0 = rd_u32(d + fo); dw = (int)(f0 >> 16); dh = (int)(f0 & 0xffff); }
+                }
                 if (d) shp_parse(d, len, 0, &ic);
                 free(d);
+                /* 0x1003167f -> 0x1017f858: the frame drawn at the marker's point plus its box's x0 / y0 (the hot spot
+                 * at the point) */
                 draw_shape(s, out, &ic, px, py);
-                /* FUN_10034d31: the shape's first two words, its height - 1 and width - 1 */
-                int dw = ic.w ? ic.w - 1 : 0, dh = ic.h ? ic.h - 1 : 0;
                 shp_free(&ic);
                 if (!f) continue;
                 int tw = text_width(s, 7, b->marker[i].label);
@@ -1179,12 +1510,29 @@ void shell_draw(shell *s, uint32_t *out)
         /* the gear editor's left list (FUN_100b2dac at B07BLIST (4, 79)): from (5, 0x19) to (0xce, 0x173) of it, each
          * item's picture in the column 5..0x65 and its text (DEVDDEUT, colour 0xfe) in 0x70..0xce, an item as tall as
          * its text or ((0x65 - 5) + 1) x 3 / 2 (+0x12d, FUN_100b327c). The text: the name and its statistics
-         * (src/garage.c). Not drawn yet: the part's picture (rendered from its model, 0x1013804f) */
+         * (src/garage.c); the picture: src/garagepic.h */
         int y = GL_Y0;
         for (int i = 0; i < s->g_n && y <= GL_Y1; i++) {
+            int h = item_h(s, s->g_item[i]);
+            if (s->g_ids[i] >= 0) {
+                if (!s->g_pics) s->g_pics = garagepic_open(s->a);
+                garagepic_draw(s->g_pics, s->g_ids[i], out, (const uint8_t (*)[3])s->pal, 4 + 5, y, 4 + 0x65, y + h - 1,
+                               4 + 5, GL_Y0, 4 + 0x65, GL_Y1);
+            }
             text_left(s, out, 9, 0xfe, GL_X0, y, GL_X1, GL_Y1, s->g_item[i]);
-            y += item_h(s, s->g_item[i]);
+            y += h;
         }
+        /* the statistics panel (src/garagepanel.h): B07CPRTY's text in (501, 15)-(625, 28); B07WEAPS's list in its
+         * inner window B07WINNR (501, 43)-(623, 141), an item as tall as its text (FUN_100cd18b), font 9 (+0xc0), its
+         * colour by the weapon's option word's high half (FUN_100cd1fe); the text box (FUN_100140a7 at B07STATS,
+         * font 9, colour 0xfe) in its rectangle +0x104 / +0x114 / +0x124, B07SINNR (501, 141)-(623, 255) for a
+         * design, drawn as FUN_10032e5f (FUN_100142e5) */
+        if (s->g_prty[0]) text_left(s, out, 9, 0xfe, 501, 15, 625, 28, s->g_prty);
+        for (int i = 0, wy = 43; i < s->g_nweap && wy <= 141; i++) {
+            text_left(s, out, 9, s->g_wcol[i], 501, wy, 623, 141, s->g_weap[i]);
+            wy += text_height(s, 9, 623 - 501 + 1, s->g_weap[i]);
+        }
+        if (s->g_stats[0]) text_left(s, out, 9, 0xfe, 501, 141, 623, 255, s->g_stats);
         /* the gear name selector (FUN_100a041c at B07GLIST): the name in its inner area (34, 4)-(183, 21) */
         if (s->g_gear[0]) text_center(s, out, 9, 0xfe, 241 + 34, 91 + 4, 241 + 183, 91 + 21, s->g_gear);
     }
@@ -1201,11 +1549,9 @@ void shell_draw(shell *s, uint32_t *out)
          * "Hits Taken: " n "\n" "Squad-mate Kills: " n "\n" "Squad-mates Killed: " n (the separator the string at
          * 0x10254f90, "\n" in the running original), drawn as the debriefing text (FUN_10032e5f) in its control's
          * second rectangle, (28, 344)-(320, 420) (FUN_100e2610's +0x20), font 9 (+0x44), colour 0xfe (+0x4c).
-         * Not done: the objectives' score list (FUN_100b9a09 at (29, 95)-(321, 309), drawn by 0x100b9fad: the
-         * objectives under "In Progress", "Complete" (100 each) and "Incomplete", then Mission Bonus, Kill Bonus (50 a
-         * kill), Death Penalty (-50 a death) and Mission Total, filled by 0x100e35cc from the scoring 0x100df8e4); the
-         * port lists the objectives in that rectangle, one a line */
-        if (s->objtext[0]) text_left(s, out, 9, 0xfe, 29, 95, 321, 309, s->objtext);
+         * The objectives' score list: draw_score (src/debrief.h); without one, the objectives' text, a line each. */
+        if (s->score.valid) draw_score(s, out, &s->score);
+        else if (s->objtext[0]) text_left(s, out, 9, 0xfe, 29, 95, 321, 309, s->objtext);
         if (s->stats[0]) text_left(s, out, 9, 0xfe, 28, 344, 320, 420, s->stats);
     }
     for (int i = 0; i < s->nlist; i++) draw_list(s, out, &s->list[i]);
@@ -1217,4 +1563,10 @@ void shell_draw(shell *s, uint32_t *out)
         text_left(s, out, 9, 0xfe, s->edit.x0, s->edit.y0, s->edit.x1, s->edit.y1, t);
     }
     if (s->box.on) text_left(s, out, 9, 0xfe, s->box.x0, s->box.y0, s->box.x1, s->box.y1, s->box.text);
+    for (int k = 0; k < SHELL_TBOXES; k++)
+        if (s->tbox[k].on) text_left(s, out, 9, 0xfe, s->tbox[k].x0, s->tbox[k].y0, s->tbox[k].x1, s->tbox[k].y1, s->tbox[k].text);
+    for (int i = 0; i < SHELL_AREAS; i++)
+        if (s->area[i].on)
+            text_left(s, out, 9, (uint8_t)s->area[i].colour, s->area[i].x0, s->area[i].y0, s->area[i].x1, s->area[i].y1,
+                      s->area[i].text);
 }

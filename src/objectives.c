@@ -9,9 +9,12 @@ static int same_ci(const char *a, const char *b)
     return !*a && !*b;
 }
 
-/* 0x10066794: a loaded nav / vehicle / structure inside BTAG `tag` becomes a target of every objective naming that
- * tag whose mask meets its own (at most 0x28 per objective) */
-static void reg(objectives *o, const char *tag, unsigned mask, int type, int idx)
+/* 0x10066794: a loaded nav / vehicle / structure under tag `tag` becomes a target of every objective in state 7
+ * naming that tag whose mask meets its own (at most 0x28 per objective). The state: 0 as its MTBL loads (0x10066090),
+ * 7 when a scope of its tag opens (0x1006663a: the record's start with the record's name, a BTAG, the "$" after an
+ * MTBL chunk) while its MTBL is loaded; a scope where no objective took 7 registers nothing (the loader's mask). So:
+ * the objective's MTBL loaded before the scope opened. */
+static void reg(objectives *o, const char *tag, int scope, unsigned mask, int type, int idx)
 {
     if (!tag[0]) return;
     for (int g = 0; g < 16; g++) {
@@ -19,7 +22,7 @@ static void reg(objectives *o, const char *tag, unsigned mask, int type, int idx
         for (int k = 0; k < t->nobj && k < 64; k++) {
             const mission_objective *ob = &t->obj[k];
             obj_state *s = &o->st[g][k];
-            if (!(ob->type & mask) || s->ntgt >= OBJ_MAX_TARGETS || !same_ci(tag, ob->tag)) continue;
+            if (t->seq >= scope || !(ob->type & mask) || s->ntgt >= OBJ_MAX_TARGETS || !same_ci(tag, ob->tag)) continue;
             s->tgt[s->ntgt].type = type;
             s->tgt[s->ntgt].idx = idx;
             s->ntgt++;
@@ -27,16 +30,26 @@ static void reg(objectives *o, const char *tag, unsigned mask, int type, int idx
     }
 }
 
-void objectives_init(objectives *o, const mission *m, int player_gps, unsigned player_mask)
+void objectives_init(objectives *o, const mission *m, int player_gps, unsigned player_mask, int mates)
 {
     memset(o, 0, sizeof *o);
     o->m = m;
-    /* registration in the loader's order: the records are walked once (INFERRED: navs, then vehicles, then
-     * structures; the order only matters past 0x28 targets) */
-    for (int i = 0; i < m->nnav && i < 0x80; i++) reg(o, m->nav[i].tag, m->nav[i].mask, OBJT_NAV, i);
-    for (int i = 0; i < m->ngps; i++) reg(o, m->gps[i].tag, m->gps[i].mask, OBJT_VEHICLE, i);
-    reg(o, "USERSTAR", player_mask, OBJT_VEHICLE, player_gps);
-    for (int i = 0; i < m->ntgt; i++) reg(o, m->tgt[i].tag, m->tgt[i].mask, OBJT_STRUCTURE, i);
+    o->mates = mates;
+    /* registration in the loader's order: 0x100c1152 registers each NAVP, GPS and GT as it reads the chunk (the
+     * INCLuded records in place), the player's USERSTAR where it is INCLuded (the order only matters past 0x28
+     * targets) */
+    int total = m->reg_seq + 1;
+    for (int q = 0; q < total; q++) {
+        if (q == m->user_seq || (m->user_seq < 0 && q == m->reg_seq)) {
+            /* the shell's USERSTAR (0x100ff1e6): the player's record, then a record per wingman, each +0x18 0x4006 */
+            int sc = m->user_seq >= 0 ? m->user_seq + 1 : m->reg_seq;
+            reg(o, "USERSTAR", sc, player_mask, OBJT_VEHICLE, player_gps);
+            for (int k = 0; k < 2; k++) if (o->mates >> k & 1) reg(o, "USERSTAR", sc, player_mask, OBJT_VEHICLE, -2 - k);
+        }
+        for (int i = 0; i < m->nnav && i < 0x80; i++) if (m->nav[i].seq == q) reg(o, m->nav[i].tag, m->nav[i].scope, m->nav[i].mask, OBJT_NAV, i);
+        for (int i = 0; i < m->ngps; i++) if (m->gps[i].seq == q && !m->gps[i].shell) reg(o, m->gps[i].tag, m->gps[i].scope, m->gps[i].mask, OBJT_VEHICLE, i);
+        for (int i = 0; i < m->ntgt; i++) if (m->tgt[i].seq == q) reg(o, m->tgt[i].tag, m->tgt[i].scope, m->tgt[i].mask, OBJT_STRUCTURE, i);
+    }
     /* 0x1006998c at the start: every objective pending, its times unset; the groups running */
     for (int g = 0; g < 16; g++) {
         for (int k = 0; k < 64; k++) {
@@ -103,6 +116,28 @@ static int at_nav(objectives *o, const obj_world *w, int nav, int g, int player_
     return 1;
 }
 
+/* 0x10066f05's other forms: the group's leader at a vehicle target (0x200: not destroyed, +0x18 & 6, and within 4000
+ * (0x10101440) - flat when one of the two is an aircraft and the other not) or at a structure's object (0x400:
+ * within 20000 (0x10101448), flat when the leader is an aircraft) */
+static int at_target(const obj_world *w, int type, int idx, int g)
+{
+    float x, y, z, tx, ty, tz;
+    int flat;
+    if (!w->leader(w->ctx, g, &x, &y, &z, &flat)) return 0;
+    if (type == OBJT_VEHICLE) {
+        int tflat, dead;
+        if (!w->vehicle_at || !w->vehicle_at(w->ctx, idx, &tx, &ty, &tz, &tflat, &dead) || dead) return 0;
+        float dx = x - tx, dy = flat == tflat ? y - ty : 0.0f, dz = z - tz;
+        return !(4000.0f * 4000.0f < dx * dx + dy * dy + dz * dz);
+    }
+    if (type == OBJT_STRUCTURE) {
+        if (!w->structure_at || !w->structure_at(w->ctx, idx, &tx, &ty, &tz)) return 0;
+        float dx = x - tx, dy = flat ? 0.0f : y - ty, dz = z - tz;
+        return dx * dx + dy * dy + dz * dz <= 20000.0f * 20000.0f;
+    }
+    return 0;
+}
+
 static void set_state(objectives *o, const obj_world *w, int g, int k, int st)
 {
     obj_state *s = &o->st[g][k];
@@ -143,13 +178,12 @@ static void step(objectives *o, const obj_world *w, int g, int k, int player_gro
             all_hit = all_hit && dead;
             ok = ok && !dead;
         }
-        if (!s->ntgt) all_hit = 0;   /* bVar5 stays set with no targets: INFERRED unreachable */
         all_hit = 0;                 /* bVar5 only matters on the network */
     } else if (t == 0x100) {
         if (g != player_group && o->current[g] != k) ok = 0;
         for (int i = 0; i < s->ntgt; i++)
             if (s->tgt[i].type == OBJT_NAV) ok = ok && at_nav(o, w, s->tgt[i].idx, g, player_group);
-            else ok = 0;   /* vehicle / object targets (0x200 / 0x400 forms): not modelled */
+            else ok = ok && at_target(w, s->tgt[i].type, s->tgt[i].idx, g);
     } else if (t == 0x2000) {
         for (int i = 0; i < s->ntgt; i++)
             if (s->tgt[i].type == OBJT_NAV) ok = ok && !at_nav(o, w, s->tgt[i].idx, g, player_group);

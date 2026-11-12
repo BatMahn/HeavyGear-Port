@@ -53,10 +53,16 @@ typedef struct {
     void (*announce)(void *ctx, int group, int obj, int state);
     /* the player's group first reached a nav that counts visits (0x100673af: AFXHDSAT at -25 dB); may be NULL */
     void (*nav_reached)(void *ctx, int nav);
+    /* a vehicle target's place (go-to's 0x200 form): 0 if none; *flat 1 for aircraft; *dead its +0x18 & 6. May be
+     * NULL (the target is never reached) */
+    int  (*vehicle_at)(void *ctx, int gps, float *x, float *y, float *z, int *flat, int *dead);
+    /* a structure target's object's place (go-to's 0x400 form, 0x1009e9a0): 0 if none. May be NULL */
+    int  (*structure_at)(void *ctx, int tgt, float *x, float *y, float *z);
 } obj_world;
 
 typedef struct {
     const mission *m;
+    int mates;                 /* the wingmen registered under USERSTAR: bit 0 slot 1, bit 1 slot 2 */
     obj_state      st[16][64];
     int            gstate[16];
     int            gstart[16];
@@ -68,8 +74,9 @@ typedef struct {
 } objectives;
 
 /* the player's GPS record (role 0) isn't in the shipped records (the shell writes USERSTAR.BWD): pass the player's
- * mask (the shell's 0x4006 widened, 0x4007) and the index the sim uses for it */
-void objectives_init(objectives *o, const mission *m, int player_gps, unsigned player_mask);
+ * mask (the shell's 0x4006 widened, 0x4007), the index the sim uses for it and the wingmen the launch wrote (bit 0 slot
+ * 1, bit 1 slot 2; their records register after the player's with the same mask, as vehicle indices -2 / -3) */
+void objectives_init(objectives *o, const mission *m, int player_gps, unsigned player_mask, int mates);
 /* once a sim second; returns the player's group state (GROUP_*) */
 int  objectives_tick(objectives *o, int sim_ticks, const obj_world *w, int player_group);
 /* the objective's type as the sim sees it (a called radio objective reads 0x10000) */

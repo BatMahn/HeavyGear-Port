@@ -44,10 +44,12 @@ typedef struct {
     int         has_zone[GEAR_ZONES];
     int         version;     /* the GDF's: 2 gears, 1 vehicles and infantry */
     int         crit_type;   /* the critical-hit table (+0xbdb, 1..5 by the torso record's id, 0x1004e6a0); 0 none */
+    int         torso_id;    /* the torso record's id (+4; its jets' lift factor, 0x1004e6a0), -1 none */
     /* the builder's sums (version 2; RE_NOTES "Gear design"): top speed = speed_points x 47.1744 (+0x4d4), stealth
      * (+0xbdf) and sensors (+0xbe3) for the radar, handling (+0xbd7), the load and the internal factor it gives */
     int         speed_points, stealth, sensors, handling, weight, capacity, head_flags;
     int         power_spare;   /* +0xbbf: the torso's second option field is 9 */
+    int         jump_jets;     /* the torso's option bit 12 (0x1003d3e9): the gear block's +0x514 = 10 jumps */
     float       internal_factor;
 } gear;
 

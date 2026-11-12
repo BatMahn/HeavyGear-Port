@@ -38,6 +38,10 @@ static void setup(void)
     memset(gps, 0, sizeof gps);
     strcpy(gps[0].tag, "ENEMY"); gps[0].mask = 0x737; gps[0].group = 1;
     strcpy(gps[1].tag, "ENEMY"); gps[1].mask = 0x7; gps[1].group = 1;
+    /* the order: the MTBL (0), the BTAG ENEMY's scope (1), the two GPS (2, 3); USERSTAR at the end */
+    m.mtbl[0].seq = 0;
+    gps[0].scope = gps[1].scope = 1; gps[0].seq = 2; gps[1].seq = 3;
+    m.reg_seq = 4; m.user_seq = -1;
     m.gps = gps; m.ngps = 2;
 }
 
@@ -46,8 +50,15 @@ int main(void)
     static objectives o;
     setup();
     obj_world w = {NULL, vdead_p, sdead, lead, NULL, NULL, NULL};
-    objectives_init(&o, &m, -1, 0x4007);
+    objectives_init(&o, &m, -1, 0x4007, 0);
     CHECK(o.st[0][1].ntgt == 2 && o.st[0][2].ntgt == 1, "targets %d %d", o.st[0][1].ntgt, o.st[0][2].ntgt);
+    {   /* an MTBL loaded after the scope opened takes none of its targets (0x1006663a found it unloaded) */
+        static objectives o2;
+        m.mtbl[0].seq = 1;
+        objectives_init(&o2, &m, -1, 0x4007, 0);
+        CHECK(o2.st[0][1].ntgt == 0 && o2.st[0][2].ntgt == 1, "late MTBL %d %d", o2.st[0][1].ntgt, o2.st[0][2].ntgt);
+        m.mtbl[0].seq = 0;
+    }
     int r = objectives_tick(&o, 181, &w, 0);
     CHECK(r == GROUP_RUNNING && o.st[0][0].state == OBJ_DONE && o.st[0][1].state == OBJ_PENDING, "start");
     dead[0] = 1;
@@ -61,7 +72,7 @@ int main(void)
 
     setup();
     memset(dead, 0, sizeof dead);
-    objectives_init(&o, &m, -1, 0x4007);
+    objectives_init(&o, &m, -1, 0x4007, 0);
     objectives_tick(&o, 181, &w, 0);
     player_dead = 1;
     r = objectives_tick(&o, 362, &w, 0);
@@ -74,7 +85,7 @@ int main(void)
     memset(dead, 0, sizeof dead);
     ob[3].type = 0x8000; ob[3].visible = 1; ob[3].ncond = 1; ob[3].cond[0].kind = 2; ob[3].cond[0].obj = 0;
     ob[3].arg_group = -1;
-    objectives_init(&o, &m, -1, 0x4007);
+    objectives_init(&o, &m, -1, 0x4007, 0);
     objectives_tick(&o, 181, &w, 0);
     CHECK(objectives_radio_slot(&o, 0, 0) == 3 && objectives_radio_slot(&o, 0, 1) == -1, "radio slot");
     objectives_tick(&o, 362, &w, 0);

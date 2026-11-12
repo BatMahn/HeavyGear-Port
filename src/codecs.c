@@ -20,6 +20,9 @@
 #define STB_VORBIS_NO_STDIO
 #define STB_VORBIS_NO_PUSHDATA_API
 #include "third_party/stb_vorbis.c"
+#define DR_FLAC_IMPLEMENTATION
+#define DR_FLAC_NO_STDIO
+#include "third_party/dr_flac.h"
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
@@ -41,7 +44,7 @@ static uint8_t *read_all(const char *path, size_t *len)
 }
 
 /* to stereo 44.1 kHz (linear interpolation when the file's rate differs) */
-static long to_cd(const int16_t *in, long frames, int ch, int rate, int16_t **out)
+long codec_to_cd(const int16_t *in, long frames, int ch, int rate, int16_t **out)
 {
     if (frames <= 0 || ch < 1 || rate <= 0) return -1;
     long n = rate == 44100 ? frames : (long)((double)frames * 44100.0 / rate);
@@ -72,13 +75,19 @@ long codec_decode_file(const char *path, int16_t **pcm)
         int ch = 0, rate = 0;
         short *s = NULL;
         int frames = stb_vorbis_decode_memory(d, (int)len, &ch, &rate, &s);
-        if (frames > 0 && s) r = to_cd(s, frames, ch, rate, pcm);
+        if (frames > 0 && s) r = codec_to_cd(s, frames, ch, rate, pcm);
         free(s);
+    } else if (len >= 4 && !memcmp(d, "fLaC", 4)) {
+        unsigned int ch = 0, rate = 0;
+        drflac_uint64 frames = 0;
+        drflac_int16 *s = drflac_open_memory_and_read_pcm_frames_s16(d, len, &ch, &rate, &frames, NULL);
+        if (s && frames > 0) r = codec_to_cd(s, (long)frames, (int)ch, (int)rate, pcm);
+        drflac_free(s, NULL);
     } else {
         drmp3_config cfg;
         drmp3_uint64 frames = 0;
         drmp3_int16 *s = drmp3_open_memory_and_read_pcm_frames_s16(d, len, &cfg, &frames, NULL);
-        if (s && frames > 0) r = to_cd(s, (long)frames, (int)cfg.channels, (int)cfg.sampleRate, pcm);
+        if (s && frames > 0) r = codec_to_cd(s, (long)frames, (int)cfg.channels, (int)cfg.sampleRate, pcm);
         drmp3_free(s, NULL);
     }
     free(d);

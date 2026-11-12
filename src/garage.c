@@ -181,3 +181,182 @@ int garage_item_text(int id, char *out, size_t n)
     }
     }
 }
+
+/* ---- a design's speed, load and capacity (HGSHELL 0x100a7346: 0x100a752f, 0x100a7802, 0x100a73a0, 0x10119f6d) ---- */
+
+static int ow(int n) { return opt_weight(n); }
+static int oc(int n) { return opt_cap(n); }
+static int om(int n) { return opt_of(n)->max_speed; }
+
+/* the option indices an item's options word names, by category (0x1011a201 .., 0x1011a7bf .., 0x1011ab2e ..) */
+static int opts_of(int t, unsigned o, int *idx)
+{
+    switch (t) {
+    case 0: idx[0] = (int)(o & 15) + 6; idx[1] = (int)(o >> 4 & 15) + 9; idx[2] = (int)(o >> 8 & 15) + 0xb; return 3;
+    case 1: idx[0] = (int)(o >> 16); return 1;
+    case 3: idx[0] = (int)(o & 15) + 0xe; idx[1] = (int)(o >> 4 & 15) + 0xe; idx[2] = (int)(o >> 8 & 15) + 0xe;
+            idx[3] = (int)(o >> 12 & 15) + 0x16; idx[4] = (int)(o >> 16 & 15) + 0x13; return 5;
+    case 4: idx[0] = (int)(o & 15) + 0x18; idx[1] = (int)(o >> 4 & 15) + 0x18; idx[2] = (int)(o >> 8 & 15) + 0x18;
+            idx[3] = (int)(o >> 12 & 15) + 0x1d; idx[4] = (int)(o >> 16 & 15) + 0x20; return 5;
+    }
+    return 0;
+}
+
+/* one part's weight (0x1011a4a9 torso, 0x1011a708 engine, 0x1011a9df arms, 0x1011adde legs, 0x1011b2f6 head, 0x1011b531
+ * a weapon's +0x1e), capacity (0x1011a50d, 0x1011a730, 0x1011aa53, 0x1011ae52) and top speed (0x1011a449, 0x1011a614,
+ * 0x1011ad4e: the record's +0x3e and the options' +0x20) */
+static void part_stats(int id, unsigned o, int *w, int *c, int *s)
+{
+    int t = garage_type(id), idx[5], n = opts_of(t, o, idx);
+    *w = *c = *s = 0;
+    if (t < 0) return;
+    if (t >= 5) { *w = fld(id, F_1E); return; }
+    *w = shell_equip_weight[id];
+    if (t == 2) {
+        static const unsigned bit[11] = {1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x200, 0x400, 0x800};
+        for (int b = 0; b < 11; b++) if (o & bit[b]) *w += ow(34 + b);
+        return;
+    }
+    for (int i = 0; i < n; i++) *w += ow(idx[i]);
+    if (t == 0 && (o >> 12 & 1)) *w += ow(51);   /* 0x1011a231 */
+    *c = fld(id, F_LOADCAP);
+    for (int i = 0; i < n; i++) *c += oc(idx[i]);
+    if (t == 0 || t == 1 || t == 4) {
+        *s = fld(id, F_MAXSPEED);
+        for (int i = 0; i < n; i++) *s += om(idx[i]);
+    }
+}
+
+/* the strider's own parts (0x10119e00's defaults: engine option 0x2d, arms 0xe x3 0x16 0x13, legs 0x18 x3 0x1d 0x20,
+ * head bit 2): Mammoth (7) 0x17 / 0x37 / 0x47 / 0x27, Naga (15) 0x1f / 0x3f / 0x4f / 0x2f */
+static const unsigned strider_def[4] = {0x2du << 16, 0, 0, 2};   /* engine, arms, legs, head */
+
+void garage_design_stats(const int *ids, const int *armor, const unsigned *opts, int n, int b30, int b31,
+                         int *speed, int *load, int *cap)
+{
+    int w = n > 0 ? opt_of(b31)->load : 0, a = 0, c = 0, s = 0, tarm = 0, tbase = 0, have_t = 0;
+    for (int i = 0; i < n; i++) {
+        int pw, pc, ps, t = garage_type(ids[i]);
+        part_stats(ids[i], opts[i], &pw, &pc, &ps);
+        w += pw; c += pc;
+        a += armor[i];
+        if (t == 0 || t == 1 || t == 4) s += ps;
+        if (t == 0) {
+            tarm = armor[i]; tbase = fld(ids[i], F_ARMOR); have_t = 1;
+            if (ids[i] == 7 || ids[i] == 15) {
+                int base = ids[i] == 7 ? 0x10 : 0x18;   /* + 0x17 / 0x37 / 0x47 / 0x27 or 0x1f / 0x3f / 0x4f / 0x2f */
+                static const int off[4] = {0x07, 0x27, 0x37, 0x17};   /* engine, arms, legs, head */
+                for (int k = 0; k < 4; k++) {
+                    int sid = base + off[k];
+                    part_stats(sid, strider_def[k], &pw, &pc, &ps);
+                    w += pw;
+                    if (k < 3) c += pc;
+                    if (k == 0 || k == 2) s += ps;
+                    a += fld(sid, F_ARMOR);
+                }
+            }
+        }
+    }
+    w += a * opt_of(b30)->load;   /* 0x100a752f: the armour times option b30's +0 */
+    /* 0x10119f6d: load over capacity, then the torso's armour over its record's */
+    int pen = 0, one = 0;
+    float r = c ? (float)w / (float)c : 0.0f;
+    if (r > 1.26f) one = 1;
+    else if (r > 1.2) pen = -5;
+    else if (r > 1.15) pen = -5;
+    else if (r > 1.1) pen = -3;
+    else if (r > 1.05) pen = -2;
+    else if (r > 1.0f) pen = -1;
+    if (have_t && tbase) {
+        float q = (float)tarm / (float)tbase;
+        if (q == 1.0f) pen -= 3;
+        else if (q >= 0.9f) pen -= 2;
+        else if (q >= 0.75f) pen -= 1;
+    }
+    s = one ? 1 : s + pen;
+    if (speed) *speed = s;
+    if (load) *load = w;
+    if (cap) *cap = c;
+}
+
+/* ---- the statistics panel's design text (HGSHELL FUN_100a7b0a with nothing selected: FUN_1016c0cc) ----
+ * "\n\n" Strength (0x100a881e) "\n" Max Speed (min(0x100a73a0, 0x100a8a2f) x 6) " KPH\n" Sensors (0x100a89b2)
+ * "\n" Stealth (0x100a88e4) "\n" Load (0x100a752f) "\n" Max Load (0x100a7802), each "<label>: <n>" (the labels from
+ * 0x10172a24, ": " 0x1023d9c4, the line break the char 0x0a: 0x1016bc45). The sums run over the design's items:
+ *   strength: torso +0x2e and its three options' +0x14 (0x1011a30d); an engine 0 / 1 / 2 / 3 by its HP under 600 /
+ *     750 / 950 / over (0x1011a644); arms +0x2e and their five options' +0x14 (0x1011a94f);
+ *   stealth: torso +0x32, its options' +0x18 and its armour step (0x1011a36d / 0x1011a14e); an engine its option's
+ *     +0x18 and +1 / 0 / -1 / -2 / -3 by HP under 400 / 600 / 750 / 950 / over (0x1011a68d); the head +0x32 and its
+ *     equipment bits' options' +0x18 (0x1011b1a5);
+ *   sensors: the head +0x36 and its bits' options' +0x24 (0x1011b054);
+ *   the second speed (0x100a8a2f): torso +0x3a and its options' +0x1c (0x1011a3e9; a strider adds its own engine's
+ *     and legs' with their default options, 0x10119e00); an engine (int)sqrt(HP) and its option's +0x1c (0x1011a5c9);
+ *     legs +0x3a and their options' +0x1c (0x1011acbe); then the load over capacity's step (0x1011a099: over 1.26 -8,
+ *     1.2 -6, 1.15 -5, 1.1 -4, 1.05 -3, 1.0 -2); 0 without an engine (or a strider). */
+static int hp_class(int hp) { return hp < 600 ? 0 : hp < 0x2ee ? 1 : hp < 0x3b6 ? 2 : 3; }
+
+static int head_bits_sum(int id, unsigned o, int sensors)
+{
+    static const unsigned bit[11] = {1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x200, 0x400, 0x800};
+    int v = fld(id, sensors ? F_HP : F_STEALTH);
+    for (int b = 0; b < 11; b++) if (o & bit[b]) v += sensors ? opt_of(34 + b)->sensors : opt_of(34 + b)->stealth;
+    return v;
+}
+
+int garage_design_text(const int *ids, const int *armor, const unsigned *opts, int n, int b30, int b31, char *out,
+                       size_t len)
+{
+    int strength = 0, stealth = 0, sensors = 0, speed2 = 0, engine = 0, top, load, cap;
+    garage_design_stats(ids, armor, opts, n, b30, b31, &top, &load, &cap);
+    for (int i = 0; i < n; i++) {
+        int id = ids[i], t = garage_type(id), idx[5], k = opts_of(t, opts[i], idx);
+        unsigned o = opts[i];
+        switch (t) {
+        case 0:
+            strength += fld(id, F_STRENGTH);
+            stealth += fld(id, F_STEALTH) + armor_step(armor[i], fld(id, F_ARMOR));
+            speed2 += fld(id, F_SPEED);
+            for (int j = 0; j < k; j++) {
+                strength += opt_of(idx[j])->strength; stealth += opt_of(idx[j])->stealth; speed2 += opt_of(idx[j])->speed;
+            }
+            if (id == 7 || id == 15) {
+                /* the strider's engine (0x17 / 0x1f: option 0x2d, its HP) and legs (0x47 / 0x4f: 0x18 x3, 0x1d, 0x20) */
+                int e = id == 7 ? 0x17 : 0x1f, l = id == 7 ? 0x47 : 0x4f;
+                speed2 += (int)sqrt((double)(fld(e, F_HP) & 0xffff)) + opt_of(0x2d)->speed;
+                static const int lo[5] = {0x18, 0x18, 0x18, 0x1d, 0x20};
+                speed2 += fld(l, F_SPEED);
+                for (int j = 0; j < 5; j++) speed2 += opt_of(lo[j])->speed;
+                engine = 1;
+            }
+            break;
+        case 1: {
+            int hp = (int)(o & 0xffff), c = hp_class(hp);
+            strength += c;
+            stealth += opt_of(idx[0])->stealth + (hp < 400 ? 1 : hp < 600 ? 0 : -c);
+            speed2 += (int)sqrt((double)hp) + opt_of(idx[0])->speed;
+            engine = 1;
+            break;
+        }
+        case 2:
+            stealth += head_bits_sum(id, o, 0);
+            sensors += head_bits_sum(id, o, 1);
+            break;
+        case 3:
+            strength += fld(id, F_STRENGTH);
+            for (int j = 0; j < k; j++) strength += opt_of(idx[j])->strength;
+            break;
+        case 4:
+            speed2 += fld(id, F_SPEED);
+            for (int j = 0; j < k; j++) speed2 += opt_of(idx[j])->speed;
+            break;
+        }
+    }
+    if (n > 0) {
+        float r = cap ? (float)load / (float)cap : 0.0f;
+        speed2 += r > 1.26f ? -8 : r > 1.2 ? -6 : r > 1.15 ? -5 : r > 1.1 ? -4 : r > 1.05 ? -3 : r > 1.0f ? -2 : 0;
+    }
+    if (!engine) speed2 = 0;
+    int ms = top < speed2 ? top : speed2;
+    return snprintf(out, len, "\n\nStrength: %d\nMax Speed: %d KPH\nSensors: %d\nStealth: %d\nLoad: %d\nMax Load: %d",
+                    strength, ms * 6, sensors, stealth, load, cap);
+}

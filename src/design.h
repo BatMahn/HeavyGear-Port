@@ -65,6 +65,9 @@ void design_remove(design *g, int i);
 void design_clear(design *g);
 /* the file name saving would use (0x100fb719): `current` the design's file ("GACHEETA" / "MYGEAR.GDF") */
 void design_save_name(const char *dir, const char *current, const char *name, char *out, size_t n);
+/* an equipment item's list picture (0x1013804f): its drawn models with their places from the root, at most max;
+ * place[] the item's view place (0x101b0012 / 16 / 1a). Returns the count */
+int  design_item_picture(hg_archive *a, int id, char (*model)[9], float (*pos)[3], int max, float place[3]);
 /* write g->gdf to dir/file; 0 on success */
 int  design_write(const design *g, const char *dir, const char *file);
 

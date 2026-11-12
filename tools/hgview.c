@@ -11,6 +11,7 @@
 #include "../src/fsutil.h"
 #include "../src/hgprj.h"
 #include "../src/hud.h"
+#include "../src/gearmodel.h"
 #include "../src/world.h"
 #include "../src/units.h"
 
@@ -83,12 +84,18 @@ int main(int argc, char **argv)
         if (getenv("HGVIEW_PITCH")) cam.pitch = (float)atof(getenv("HGVIEW_PITCH"));
         if (getenv("HGVIEW_FOV")) cam.fov = (float)atof(getenv("HGVIEW_FOV"));
     }
-    /* the HUD (HGVIEW_HUD=0 hides it; H toggles it in the window) */
-    hud *hd = hud_load(a, 0);
-    /* the player's gear: the shell writes it into USERSTAR (USERGEAR); the viewer takes HGVIEW_GEAR, else the Hunter */
+    /* the player's gear: the shell writes it into USERSTAR (USERGEAR); the viewer has no shell, so it takes
+     * HGVIEW_GEAR, else the Hunter. The HUD (HGVIEW_HUD=0 hides it; H toggles it in the window) is that gear's
+     * faction's set (its GDF block +0x2c -> +0x613, 0x10020d48) */
+    const char *gn = getenv("HGVIEW_GEAR") ? getenv("HGVIEW_GEAR") : "gdhuntea";
+    int faction = 0;
+    {
+        gearmodel gm;
+        if (!gearmodel_load(a, gn, &gm)) faction = gm.faction == 1;
+    }
+    hud *hd = hud_load(a, faction);
     if (hd) {
         gear g;
-        const char *gn = getenv("HGVIEW_GEAR") ? getenv("HGVIEW_GEAR") : "gdhuntea";
         if (!gear_load(a, gn, &g)) hud_set_gear(hd, a, &g, 0);
         else fprintf(stderr, "gear %s not found\n", gn);
     }

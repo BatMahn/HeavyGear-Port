@@ -8,10 +8,12 @@ traced. Heavy Gear runs on a later generation of the MechWarrior 2 engine. The M
 compare against, never as code: every format and value here is taken from Heavy Gear's own binaries and data.
 Portable C99 with SDL3; builds on macOS, Linux and Windows. You need your own copy of the game's two CDs (see "Setting up the game folder": no installation needed).
 
-## Status (2026-11-11, v0.7.2 - early preview)
+## Status (2026-11-12, v1.0.0)
 
-**Not fully playable yet.** It loads the game's data, runs the story's front end (briefing, squad, gear editor) and
-lets you fight a mission. See CHANGELOG.md for what each release added.
+**Playable.** The story campaign, training, Tour of Duty (with the original's random mission generator) and LAN
+multiplayer, with the original's AI, gear simulation, animations, HUD, views, sounds and both looks (SOFTWARE and 3D).
+Every value is traced from the original binaries (docs/RE_NOTES.md). KNOWN_ISSUES.md lists what is still missing or
+different; CHANGELOG.md lists what each release added.
 
 - **Data:**
   - HEAVYG.MAP / HEAVYG.PRJ, including the PKWARE-imploded and zlib-packed records. All 19,545 records unpack, with
@@ -42,11 +44,12 @@ lets you fight a mission. See CHANGELOG.md for what each release added.
 - **Patch 1.2:** its data files (new textures, mission tables, particle definitions, SKYGND.PAR) are in
   `gamedata/patch12/` and are used automatically.
 
-Planned looks: **SOFTWARE** (the original's 8-bit software renderer: XEL texels through its lighting tables) and **3D**
-(the hardware renderers' textures, the 1.2 patch's textures, particles and lighting), chosen with one in-game setting.
+Looks: **SOFTWARE** (the original's 8-bit software renderer: XEL texels through its lighting tables) and **3D** (the
+Direct3D renderer's textures, the 1.2 patch's textures, particles and lighting), picked by the options' Graphics Type
+(hgsnd.cfg) or L in a mission.
 
 docs/RE_NOTES.md holds everything traced so far, with addresses, and how it compares with MechWarrior 2.
-KNOWN_ISSUES.md lists what is open.
+KNOWN_ISSUES.md lists what is still open.
 
 ## Build
 
@@ -194,11 +197,17 @@ Then run `heavygear ~/HeavyGear` (on Windows `heavygear.exe C:\Games\HeavyGear`)
 ## Running
 
 ```
-heavygear <game folder>                  the front end; in a mission you drive the gear (1-9 / 0 throttle, W / S,
-                                         arrows turn, mouse drag looks, Space fires, Enter next weapon, T / F / Q
-                                         target, N nav; F1 mission channel, F2-F7 squad mates, then a digit picks;
-                                         F12 objectives; ` free camera); the objectives end it, or Ctrl+F12
-                                         accomplished, Esc failed
+heavygear <game folder>                  the front end and the game; in a mission (INPUTW.MAP / GAMEKEY.MAP keys):
+                                         1-9 / 0 / = / - throttle, arrows turn the legs, Shift + arrows side-step,
+                                         Ctrl + arrows glance; mouse / Comma / Period / Up / Down the torso, M feet to
+                                         torso, Keypad 5 reset; W skate, J jump jets, Tab crouch, S stand, Backspace
+                                         reverse; Space fire, Enter next weapon; T / Y / F target any / enemy /
+                                         friend (Shift back), E nearest enemy, Q under the reticle, N nav; C cockpit /
+                                         outside, F10 missile view, F9 target display, F8 map, F11 HUD, Z zoom, X radar
+                                         zoom; F1 mission channel, F2-F7 squad mates, F12 objectives; Esc the menu;
+                                         Ctrl + ` free camera; L the look
+heavygear with HG_MISSION=m01            a mission straight away (HG_GEAR picks the gear); HG_NET_HOST=<port> /
+                                         HG_NET_JOIN=<host>:<port> a LAN game on that mission
 hgview <game folder> m01                 mission 1 from the player's start (WASD / arrows, mouse drag to look, Q / E
                                          down / up, Shift fast, L the SOFTWARE / 3D look, H the HUD)
 hgview <game folder> m01 -40000 20000 135   start at x, z, facing (degrees)

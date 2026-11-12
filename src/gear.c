@@ -22,6 +22,62 @@ static int v1_zone(int kind)
     return 0;
 }
 
+/* version 1 (0x1004f86d): a record's internal bonus (local_84, reset for each record): the arm records (kinds
+ * 0xd..0x14) id 1 +50, options 0x19 / 0x1a / 0x1b +50 / +100 / +150; the leg records (0x1b..0x1f) id 1 / 2 +50,
+ * options 1 / 6 / 0xb / 0x10 -25, 0x15..0x18 +50, 0x19 / 0x1a / 0x1b +100 / +200 / +300. The 20 options are the
+ * record's ints from +0x14. */
+static int v1_internal_bonus(int kind, int id, const uint8_t *r)
+{
+    int b = 0;
+    if (kind >= 0xd && kind <= 0x14) {
+        if (id == 1) b = 0x32;
+        for (int q = 0; q < 0x14; q++) {
+            int o = rd_i32(r + 0x14 + q * 4);
+            b += o == 0x19 ? 0x32 : o == 0x1a ? 100 : o == 0x1b ? 0x96 : 0;
+        }
+    } else if (kind >= 0x1b && kind <= 0x1f) {
+        if (id == 1 || id == 2) b = 0x32;
+        for (int q = 0; q < 0x14; q++) {
+            int o = rd_i32(r + 0x14 + q * 4);
+            if (o == 1 || o == 6 || o == 0xb || o == 0x10) b -= 0x19;
+            else if (o >= 0x15 && o <= 0x18) b += 0x32;
+            else if (o == 0x19) b += 100;
+            else if (o == 0x1a) b += 200;
+            else if (o == 0x1b) b += 300;
+        }
+    }
+    return b;
+}
+
+/* version 1 (0x1004f86d): stealth (+0xbdf) the chassis record's (kind 1) +0x64, +5 for a head option 0xe; sensors
+ * (+0xbe3) by the head record (kind 3): id 3 / 4 / 5 / 6..9 +6 / 7 / 2 / 3, options 1 +2, 2 +1, 5 +4, 6 +3, 0xd +4,
+ * 0xe -2; handling (+0xbd7): chassis id 1 / 2 / 3 / 4 / 5 +1 / 2 / 3 / 5 / 10, arm records (0xd..0x14) id 0 / 1 / 2+
+ * +1 / 2 / 3, their options 2 / 7 / 0xc / 0x11 and 4 / 9 / 0xe / 0x13 and 0x15 / 0x17 +1, 5 / 0xa / 0xf / 0x14 and
+ * 0x16 / 0x18 +2 */
+static void v1_sums(gear *g, int kind, int id, const uint8_t *r)
+{
+    if (kind == 1) {
+        g->stealth = rd_i32(r + 0x64);   /* set (local_80 =), the head option adds after it */
+        static const int h[6] = {0, 1, 2, 3, 5, 10};
+        if (id >= 0 && id < 6) g->handling += h[id];
+    } else if (kind == 3) {
+        g->sensors += id == 3 ? 6 : id == 4 ? 7 : id == 5 ? 2 : id >= 6 && id <= 9 ? 3 : 0;
+        for (int q = 0; q < 0x14; q++) {
+            int o = rd_i32(r + 0x14 + q * 4);
+            g->sensors += o == 1 ? 2 : o == 2 ? 1 : o == 5 ? 4 : o == 6 ? 3 : o == 0xd ? 4 : o == 0xe ? -2 : 0;
+            if (o == 0xe) g->stealth += 5;
+        }
+    } else if (kind >= 0xd && kind <= 0x14) {
+        g->handling += id == 0 ? 1 : id == 1 ? 2 : 3;
+        for (int q = 0; q < 0x14; q++) {
+            int o = rd_i32(r + 0x14 + q * 4);
+            if (o == 2 || o == 7 || o == 0xc || o == 0x11 || o == 4 || o == 9 || o == 0xe || o == 0x13 || o == 0x15 ||
+                o == 0x17) g->handling += 1;
+            else if (o == 5 || o == 10 || o == 0xf || o == 0x14 || o == 0x16 || o == 0x18) g->handling += 2;
+        }
+    }
+}
+
 static float v2_internal(int kind, int id, int opts)
 {
     static const int f2[3][2] = {{0, 6}, {4, 9}, {8, 0xb}};
@@ -103,6 +159,7 @@ static void design(gear *g, const uint8_t *rec, int n)
                 weight += wtab(idx[q]); capacity += opt(idx[q], 6);
             }
             if (o >> 12 & 1) weight += 500;   /* 0x10103530 */
+            g->jump_jets = o >> 12 & 1;       /* 0x1003d3e9 -> +0x510 = 0x2d4, +0x514 = 10 (0x1004e6a0) */
             /* 0x1003d306: the torso's armor against its full armor */
             {
                 int full = gear_equip_sum[id].armor;
@@ -190,14 +247,17 @@ int gear_load(hg_archive *a, const char *name, gear *g)
                         /* the torso's id picks the crit table (0x1004e6a0's switch) */
                         static const int ct[16] = {1, 1, 2, 3, 3, 4, 4, 5, 1, 1, 2, 3, 3, 4, 4, 5};
                         g->crit_type = id >= 0 && id < 16 ? ct[id] : 0;
+                        g->torso_id = id;
                     }
                     if (z) {
                         float ar = (float)rd_i32(r + 8);
-                        if (ver == 2) ar += (hflags & 2) ? 10.0f : (hflags & 1) ? 5.0f : 0.0f;   /* 0x10101148 / 44 */
+                        ar += (hflags & 2) ? 10.0f : (hflags & 1) ? 5.0f : 0.0f;   /* 0x10101148 / 44, both builders */
                         g->armor[z - 1] = ar;
-                        g->internal[z - 1] = ver == 2 ? v2_internal(kind, id, rd_i32(r + 0xc)) : (float)rd_i32(r + 0xc);
+                        g->internal[z - 1] = ver == 2 ? v2_internal(kind, id, rd_i32(r + 0xc))
+                                                      : (float)(rd_i32(r + 0xc) + v1_internal_bonus(kind, id, r));
                         g->has_zone[z - 1] = 1;
                     }
+                    if (ver != 2) v1_sums(g, kind, id, r);
                     if (ver != 2) {
                         /* version 1 (0x1004f86d): the records of weapon zones (8 and up) are weapons; the type is the
                          * record's +4, the rounds +0x68 magazines of (+0x30, or +0x34 for 's' mounts: not modelled)

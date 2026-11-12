@@ -30,5 +30,41 @@ int  sfx_at(const char *name, float x, float y, float z, int quiet, unsigned fla
 void sfx_move(int voice, float x, float y, float z, int quiet);
 void sfx_stop(int voice);
 int  sfx_playing(int voice);
+/* stop the first channel playing a sound (0x100087d8); set the frequency of every channel playing it (0x100084f1) */
+void sfx_stop_name(const char *name);
+void sfx_rate_name(const char *name, int hz);
+
+/*
+ * The gear's motion sounds, as HGSIM plays them (every one only for the player's own vehicle). Volumes go through the
+ * effects' level (hgsnd.cfg, audio_level_db) like every effect. The callers (the walk / skate / jump code) call:
+ *  - sfx_footstep: AFXHGWKL placed at the vehicle (its +0x54..: x, y, z), priority 0x32, quiet in the cockpit view
+ *    (0x101316f4) - at each foot-down, the animation's event flag 8 in the vehicle's +0x84 (0x1003fbb7, where the
+ *    foot's dust is thrown too, 0x10086007);
+ *  - skating (0x1005d75c, the gear block's +0x562 bit 1 skating): sfx_skate_engage when the skates go down (AFXHGWEN
+ *    -20 dB, priority 0x50; the spin-up +0x607 = 1, +0x60f = +0x60b, and the "skates" count +0x110 of HGCAR);
+ *    sfx_skate_run when the spin-up ends (+0x60f below 1: AFXHGWHE looped at -20 dB, 0x150); sfx_skate_speed each
+ *    tick while skating and moving (the wheel loop's frequency = (int)(|velocity +0x548| x 200 + 13538) Hz,
+ *    0x1005ff13); sfx_skate_stop when skating ends or the spin-up is cut (AFXHGWHE stopped, AFXHGWDE -20 dB, 0x50);
+ *  - jump jets (0x1005d75c): sfx_jump_burn as a burn starts (+0x510 at 0x2d4 when the jets fire: AFXHGJJT looped at
+ *    0 dB 0x150, AFXHGJJF 0 dB 0x32); sfx_jump_burn_end when the burn's timer runs out (AFXHGJJT stopped, 0x100610bd);
+ *  - sfx_fall: AFXHGFLS -10 dB, 0x50, when the gear falls (the 0x562 bits 4 / 0x400 set, a leg lost or knocked down);
+ *  - sfx_landing: on touching down hard (0x1005366d from 0x1005d75c): AFXHGJLR when the fall speed is at most 140,
+ *    else AFXHGCOO, placed at the vehicle's position less its +0x520 (the soles), priority 0x32, quiet in the cockpit;
+ *  - sfx_bump: another vehicle running into the player (0x100354eb, the network's collision message): AFXHGCOO at
+ *    (int)(-10000 x min(speed, 25) / 150 / 6) hundredths of a dB, 0x32.
+ * And the particle engine's laser beams: sfx_laser_loop(1) as a laser's beam segment starts (0x1007b956: AFXWLLLC
+ * looped at -10 dB, 0x150 - its 0x100 lets one play at a time), (0) as one ends (0x1007aec2).
+ */
+void sfx_footstep(float x, float y, float z, int quiet);
+void sfx_skate_engage(void);
+void sfx_skate_run(void);
+void sfx_skate_speed(float speed);
+void sfx_skate_stop(void);
+void sfx_jump_burn(void);
+void sfx_jump_burn_end(void);
+void sfx_fall(void);
+void sfx_landing(float x, float y, float z, float speed, int quiet);
+void sfx_bump(float speed);
+void sfx_laser_loop(int on);
 
 #endif

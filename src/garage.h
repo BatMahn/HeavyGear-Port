@@ -35,7 +35,15 @@ int  garage_model(int torso);
  * options (0x10119e00), formatted as the original's (0x1016c7e7 torso, 0x1016ffc9 engine, 0x1016da41 head, 0x1016e571
  * arms, 0x1016f0a1 legs, 0x10170d53 weapons). Returns the text's length */
 int  garage_item_text(int id, char *out, size_t n);
+/* a design's top speed (points; x 6 KPH), load and capacity as the editor's view sums them (0x100a7346: 0x100a752f,
+ * 0x100a7802, 0x100a73a0 with the penalties of 0x10119f6d): items' ids, armour, options words and the design's two
+ * bytes (+0x30 / +0x31) */
+void garage_design_stats(const int *ids, const int *armor, const unsigned *opts, int n, int b30, int b31,
+                         int *speed, int *load, int *cap);
 /* the items of category `cat` the list shows, in their order: n ids into ids (max), returns n */
+/* the statistics panel's text for a design with nothing selected (FUN_100a7b0a -> FUN_1016c0cc) */
+int  garage_design_text(const int *ids, const int *armor, const unsigned *opts, int n, int b30, int b31, char *out,
+                        size_t len);
 int  garage_list(int cat, int north, int model, int level, int *ids, int max);
 /* a design's parts: the equipment ids of a GDF's records (n, at most max); -1 if it isn't a GDF */
 int  garage_design(const unsigned char *gdf, size_t len, int *ids, int max);

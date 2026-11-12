@@ -11,8 +11,11 @@ void structures_init(structures *st, const world *w)
         const mission_target *g = &m->tgt[i];
         int hp = g->hp < 0 ? -g->hp : g->hp;
         st->s[i].hp = hp == 32000 ? 0 : hp;
+        st->s[i].boom = g->hp >= 0 ? 0x32 : (hp & 1) ? 0x24 : 0x16;   /* 0x100c1152 flags 1 / 2, 0x1001cc6c */
         st->s[i].inst = world_obj_instance(w, g->obj);
         st->s[i].wreck = world_obj_instance(w, g->alt);
+        st->s[i].obj = g->obj;
+        st->s[i].alt = g->alt;
     }
 }
 
@@ -71,7 +74,7 @@ int structures_damage(structures *st, world *w, int i, int power)
     if (st->s[i].hp >= 1) return 0;
     st->s[i].hp = 0;
     st->s[i].dead = 1;
-    world_show_object(w, st->s[i].inst, 0);
-    if (st->s[i].wreck >= 0) world_show_object(w, st->s[i].wreck, 1);
+    world_show_obj(w, st->s[i].obj, 0);
+    if (st->s[i].alt >= 0) world_show_obj(w, st->s[i].alt, 1);
     return 1;
 }

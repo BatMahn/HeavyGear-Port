@@ -12,6 +12,7 @@
 #define HG_FRONT_H
 
 #include "squad.h"
+#include "debrief.h"
 
 #include "hgprj.h"
 
@@ -43,11 +44,18 @@ void   front_squad_lost(front *f, int first, int second);
 
 /* after FRONT_MOVIE: the cutscene to play ("ZL_CUT01") */
 const char *front_movie(const front *f);
-/* back from the mission: success advances the story (INFERRED: the sim's result handling is not traced yet) */
+/* back from the mission: success advances the story (traced: HGSHELL 0x100df8e4) */
 void   front_mission_over(front *f, int success);
+/* a multiplayer launch: the session the sim takes over (NULL otherwise); after the mission, front_mp_over with the
+ * scores' text closes it and shows B39 */
+struct net;
+struct net *front_net(front *f);
+void   front_mp_over(front *f, const char *results);
 /* the mission's statistics for the debriefing (shell_set_stats) */
 void   front_mission_stats(front *f, const char *text);
 void   front_mission_objectives(front *f, const char *text);
+/* before front_mission_over: the sim's objectives, kills and deaths (hgmsn.cfg / HGCAR, src/debrief.h) */
+void   front_mission_result(front *f, const debrief_in *in);
 void   front_draw(front *f, uint32_t *out);
 /* the time (ms) for the briefing's narration */
 void   front_tick(front *f, uint64_t ms);
@@ -57,4 +65,7 @@ void   front_sound_pause(front *f);
 void   front_state(front *f, int state);
 const char *front_screen(const front *f);
 
+#include "options.h"
+/* the option blocks (hgdif.cfg / hgsnd.cfg) as the options screen leaves them */
+const options *front_options(const front *f);
 #endif

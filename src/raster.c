@@ -103,8 +103,6 @@ void raster_triangle(raster_target *t, const raster_vertex *a, const raster_vert
                         for (int s = 0; s < 4; s++) ch[s] += wq[k] * (float)((q[k] >> (s * 8)) & 255);
                     col = 0;
                     for (int s = 0; s < 4; s++) col |= (uint32_t)(ch[s] + 0.5f) << (s * 8);
-                    if ((col >> 24) < 128) continue;
-                    col |= 0xff000000u;
                 } else {
                     col = tex->texels[(size_t)ty * tex->w + tx];
                     if ((col >> 24) < 128) continue;   /* the same alpha test as the filtered path */
@@ -114,8 +112,20 @@ void raster_triangle(raster_target *t, const raster_vertex *a, const raster_vert
                 col = argb;
             }
             t->depth[o] = iw;
-            t->color[o] = shade(col, w0 * a->r + w1 * b->r + w2 * c->r, w0 * a->g + w1 * b->g + w2 * c->g,
-                                w0 * a->b + w1 * b->b + w2 * c->b, w0 * a->fog + w1 * b->fog + w2 * c->fog, t->fog_rgb);
+            uint32_t out = shade(col, w0 * a->r + w1 * b->r + w2 * c->r, w0 * a->g + w1 * b->g + w2 * c->g,
+                                 w0 * a->b + w1 * b->b + w2 * c->b, w0 * a->fog + w1 * b->fog + w2 * c->fog, t->fog_rgb);
+            uint32_t al = tex && t->bilinear ? col >> 24 : 255;
+            if (al < 255) {
+                /* the 3D look blends by the texel's alpha (HG's Direct3D plugin draws textured polygons with
+                 * SRCALPHA / INVSRCALPHA, DX5DRAW 0x10004360 mode 8; the depth is written all the same) */
+                uint32_t d = t->color[o], r = 0;
+                for (int sh = 0; sh < 24; sh += 8) {
+                    uint32_t sc = (out >> sh) & 255, dc = (d >> sh) & 255;
+                    r |= ((sc * al + dc * (255 - al) + 127) / 255) << sh;
+                }
+                out = 0xff000000u | r;
+            }
+            t->color[o] = out;
         }
     }
 }

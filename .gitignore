@@ -1,0 +1,16 @@
+/hgprj
+/hgview
+/heavygear
+/test_data
+/test_unpack
+/test_sim
+*.exe
+*.o
+/dist/
+/test_combat
+/test_objectives
+/test_radio
+/test_effects
+/test_garage
+/test_squad
+__pycache__/

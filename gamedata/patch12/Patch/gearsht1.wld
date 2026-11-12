@@ -1,0 +1,43 @@
+#Explosion Polys
+
+#mangle_on
+hgexplode Chunky        wgchunk0  15           
+hgexplode GearDeath        wxgdeath  10           
+hgexplode Explosion        wxexplod  20           
+hgexplode GroundExpl       wxgrexpl  20           
+hgexplode FlamingObject    wxflamob  10           
+hgexplode BuildingExpl     wxbldgex  10           
+hgexplode BigBuildingExpl  wxbgbldg  10           
+hgexplode SmallFire        wxsmfire  10           
+hgexplode SmokeColumn      wxsmokec  10           
+hgexplode Nuke			wxnukeit 5
+#hgexplode PpcFlash1		wxcanmzl 20
+#hgexplode BulletFlash1		wxmgnmzl 20
+#hgexplode MissileFlash1		wxrckmzl 20
+hgexplode RailGun               wxrgntrl 20
+hgexplode CannonHit        wxcnnhit   20
+hgexplode LaserHit         wxlashit   20
+#hgexplode NagaFlash		wxnagmzl 10
+
+#Shot Polys
+
+projectile Tracer       wstracer  40      
+projectile BigTracer    wsbtracr  40
+projectile SmallShell   wssshell  20
+projectile LargeShell   wslshell  20
+projectile Shotgun      wsshotgn  20
+projectile HandGrenade  wshgrnad  20
+projectile MediumRocket wsmrockt  20
+projectile LargeRocket  wsmissle  20
+projectile SmallMortar  wssmortr  20
+projectile Mortar		wsmortar  20
+projectile Grenade	wsgrnade  20
+projectile LargeGrenade	wslgrnad  20
+projectile LightRocket	wslrockt  20
+projectile HeavyRocket	wshrockt  20
+projectile LightBazooka wslbazok  20
+projectile MediumBazooka wsmbazok 20
+projectile HeavyBazooka	wshbazok  20
+
+
+#mangle_off

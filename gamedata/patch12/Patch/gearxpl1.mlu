@@ -1,0 +1,277 @@
+#mlu
+
+# Explosion Texture Maps
+
+bigbldex
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+bigexpls
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+buildexp
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+dirtpuff
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxdust
+        begin_frame     0
+        end_frame       5
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+explsion
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+grndexpl
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+flamgrnd
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxfire
+        begin_frame     0
+        end_frame       3
+        framerate_min   12
+        framerate_max   18
+	rgb 165 167 178
+end
+
+geardeth
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+smalfire
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxfire
+        begin_frame     0
+        end_frame       3
+        framerate_min   12
+        framerate_max   19
+	rgb 165 167 178
+end
+
+smokecol
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture wxsmok
+        begin_frame     1
+        end_frame       13
+        framerate_min   14
+        framerate_max   18
+	rgb 165 167 178
+end
+
+nukeexpl
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxboom
+        begin_frame     0
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+	rgb 165 167 178
+end
+
+cnmzlfls
+        type animated_procedural
+        shade_index     1
+        shade_ramp      1
+        texture wxcann
+        begin_frame     3
+        end_frame       3
+        framerate_min   12
+        framerate_max   16
+        rgb 255 255 255
+end
+
+mgmzlfls
+        type animated_procedural
+        shade_index     1
+        shade_ramp      1
+        texture wxmacg
+        begin_frame     1
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+        rgb 255 255 255
+end
+
+rcmzlfls
+        type animated_procedural
+        shade_index     1
+        shade_ramp      1
+        texture wxexhs
+        begin_frame     1
+        end_frame       4
+        framerate_min   12
+        framerate_max   16
+        rgb 255 255 255
+end
+
+railgntr
+        type animated_procedural
+        shade_index     1
+        shade_ramp      1
+        texture fxblue
+        begin_frame     0
+        end_frame       2
+        framerate_min   08
+        framerate_max   08
+        rgb 255 255 255
+end
+
+cannonht
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxflar
+        begin_frame     0
+        end_frame       3
+        framerate_min   12
+        framerate_max   18
+	rgb 165 167 178
+end
+
+laserhit
+        type animated_procedural
+	shade_index	7
+	shade_ramp	7
+        texture fxflar
+        begin_frame     0
+        end_frame       3
+        framerate_min   12
+        framerate_max   18
+	rgb 165 167 178
+end
+
+# Projectile Texture Maps
+
+tracerfr
+        type animated_procedural
+	shade_index	1
+	shade_ramp	1
+        texture wxlase
+        begin_frame     1
+        end_frame       1
+        framerate_min   1
+        framerate_max   1
+	rgb 165 167 178
+end
+
+darkgrey
+        type gouraud
+	shade_index	3
+	shade_ramp	4
+	rgb 45 45 45
+end
+
+artshell
+        type true_perspective
+	shade_index	7
+	shade_ramp	4
+        texture wslshell
+	rgb 145 145 145
+end
+
+
+mortarsh
+        type true_perspective
+	shade_index	7
+	shade_ramp	4
+        texture wssmortr
+	rgb 145 145 145
+end
+
+grenadem
+        type true_perspective
+	shade_index	7
+	shade_ramp	4
+        texture wsgrnade
+	rgb 145 145 145
+end
+
+rocketmp
+        type true_perspective
+	shade_index	7
+	shade_ramp	4
+        texture wshrockt
+	rgb 145 145 145
+end
+
+missilem
+        type true_perspective
+	shade_index	7
+	shade_ramp	4
+        texture wsmissle
+	rgb 145 145 145
+end
+
+bazookam
+        type true_perspective
+	shade_index	7
+	shade_ramp	4
+        texture wshbazok
+	rgb 145 145 145
+end

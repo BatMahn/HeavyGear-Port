@@ -1,0 +1,106 @@
+#
+# tik's wonderful world of skygnd.par
+#
+# mission=(mission name, first 4 letters)
+# globalintensity=(software global light; see artfile for software ambient)
+# hardwareintensity=(D3D global light)
+# hardwareambient=(D3D ambient light; minimum light in world)
+# gintensity=(gouraud mode global light)
+# gambient=(gouraud mode ambient light; minimum light in world)
+# skytexture=(texture of the scrolling sky in D3D)
+# horizontexture=(texture of the horizon in software only)
+# hardwarehorizon=(texture of the horizon in D3D)
+# horizontile=(number of times the texture tiles horizonally; both D3D and software)
+# skycolor=(indexcolor of solid color above the software horizontexture),
+#          (alpha channel of scrolling sky in d3d; 255-fully opaque 0-fully translucent), 
+#	   (indexcolor of solid color below the software horizontexture), 
+#	   (scrolling sky tiling rate), 
+#	   (indexcolor of solid color above the hardware horizontexture), 
+#	   (indexcolor of solid color below the hardware horizontexture)
+# fogswitch=(in hardware: 1=fog to fog color, 0=no fog, 1=fog to fog color)
+#           (in software: 1=fog up the luma, 0=no fog, -1=fog down the luma)
+#	    (in software, shadedist always overrides fogswitch)	
+# fogcolor=(fog color for d3d red,green,blue,alpha)
+# skyspeed=(speed of sky. texels/sec)
+# density=(fog density: Y-distance in Y direction, M-min. density normalized between 0 and 1, Z-min. distance in Z)
+#
+
+mission=m01_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K10wtday horizontexture=kx6wtday hardwarehorizon=K07withz horizontile=2 skycolor=203,255,203,47,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=3 density=0,0,30000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m02_ globalintensity=40 hardwareintensity=30 hardwareambient=10 gintensity=45 gambient=45 skytexture=K02sunst horizontexture=kdn00182 hardwarehorizon=K03sunhz horizontile=2 skycolor=192,150,240,17,40,240 fogswitch=-1 fogcolor=0,0,0,128 skyspeed=1.5 density=0,0,29000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m03_ globalintensity=30 hardwareintensity=20 hardwareambient=10 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=k01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,80 skyspeed=1 density=0,0,29000 hambient=15,13,52 l1=82,82,82,0,1,0 l2=140,188,213,-1,-1,0 gl=180,180,180
+
+mission=m04_ globalintensity=45 hardwareintensity=90 hardwareambient=10 gintensity=45 gambient=45 skytexture=K15sunst horizontexture=k1207110 hardwarehorizon=K04sunhz horizontile=2 skycolor=206,254,109,33,204,110 fogswitch=1 fogcolor=230,178,153,64 skyspeed=3 density=0,0,30000 hambient=34,21,31 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=218,196,165
+
+mission=m05_ globalintensity=40 hardwareintensity=40 hardwareambient=20 gintensity=45 gambient=45 skytexture=K15sunst horizontexture=kdn00182 hardwarehorizon=K07withz horizontile=2 skycolor=192,254,240,30,204,207 fogswitch=-1 fogcolor=171,213,255,64 skyspeed=3 density=-100,.05,30000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m06_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K14wtday horizontexture=kx4wtday hardwarehorizon=K07withz horizontile=2 skycolor=194,255,203,40,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=3 density=0,0,39000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m07_ globalintensity=45 hardwareintensity=100 hardwareambient=10 gintensity=45 gambient=45 skytexture=K08wtday horizontexture=k1207247 hardwarehorizon=K07withz horizontile=2 skycolor=206,255,246,20,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=3 density=0,0,30000 hambient=25,25,35 l1=155,155,155,0,1,0 l2=255,255,200,-1,-1,0 gl=60,60,80
+
+mission=m08_ globalintensity=40 hardwareintensity=30 hardwareambient=12 gintensity=45 gambient=45 skytexture=K09wtday horizontexture=kx11suns hardwarehorizon=K09dawnn horizontile=2 skycolor=235,141,240,30,32,184 fogswitch=-1 fogcolor=42,64,64,64 skyspeed=3 density=-10000,.4,3000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m09_ globalintensity=40 hardwareintensity=30 hardwareambient=15 gintensity=45 gambient=45 skytexture=K15sunst horizontexture=kx03suns hardwarehorizon=K08dawnn horizontile=2 skycolor=64,138,240,30,32,117 fogswitch=-1 fogcolor=200,134,68,64 skyspeed=3 density=0,0,5000 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m10_ globalintensity=40 hardwareintensity=39 hardwareambient=14 gintensity=45 gambient=45 skytexture=K06wtday horizontexture=kx09suns hardwarehorizon=K03snowz horizontile=2 skycolor=64,139,240,25,64,204 fogswitch=-1 fogcolor=116,144,173,64 skyspeed=3 density=0,0,38000 hambient=66,100,105 l1=160,160,200,0,1,0 l2=255,158,115,-1,-1,0 gl=207,153,123
+
+mission=m11_ globalintensity=30 hardwareintensity=20 hardwareambient=10 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=k01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,64 skyspeed=.2 density=0,0,20000 hambient=29,63,119 l1=40,73,94,0,1,0 l2=91,128,189,-1,-1,0 gl=76,129,162
+
+mission=m12_ globalintensity=40 hardwareintensity=30 hardwareambient=8 gintensity=45 gambient=45 skytexture=K14sunst horizontexture=kx01suns hardwarehorizon=K01dawnn horizontile=2 skycolor=240,144,240,30,32,244 fogswitch=-1 fogcolor=73,73,73,64 skyspeed=3 density=-24000,0,0.01 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m13_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K09wtday horizontexture=kx6wtday hardwarehorizon=K07withz horizontile=2 skycolor=203,254,246,30,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=3 density=-30000,0.5,12500  hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m14_ globalintensity=40 hardwareintensity=45 hardwareambient=12 gintensity=45 gambient=45 skytexture=K14sunst horizontexture=kx10suns hardwarehorizon=K07dawnn horizontile=2 skycolor=97,135,240,20,32,117 fogswitch=-1 fogcolor=200,134,68,240 skyspeed=3 density=-1000,0.5,12500 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m15_ globalintensity=40 hardwareintensity=22 hardwareambient=9 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=K01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,64 skyspeed=.2 density=0,0,30000 hambient=15,13,52 l1=82,82,82,0,1,0 l2=140,188,213,-1,-1,0 gl=180,180,180
+
+mission=m16_ globalintensity=40 hardwareintensity=30 hardwareambient=10 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kdn03241 hardwarehorizon=K10dawnn horizontile=2 skycolor=241,140,240,25,32,109 fogswitch=-1 fogcolor=200,156,134,64 skyspeed=3 density=0,0,10000 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m17_ globalintensity=30 hardwareintensity=23 hardwareambient=10 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=K01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,64 skyspeed=.2 density=0,0,30000 hambient=52,27,13 l1=82,82,82,0,1,0 l2=140,188,213,-1,-1,0 gl=180,180,180
+
+mission=m18_ globalintensity=40 hardwareintensity=30 hardwareambient=8 gintensity=45 gambient=45 skytexture=K14sunst horizontexture=kdn03241 hardwarehorizon=K01dawnn horizontile=2 skycolor=241,144,240,25,32,244 fogswitch=-1 fogcolor=73,73,73,64 skyspeed=3 density=0,0.5,1000 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m19_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K06wtday horizontexture=k2207204 hardwarehorizon=K07withz horizontile=2 skycolor=206,150,203,25,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=2 density=-9,0.06,9000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m20_ globalintensity=40 hardwareintensity=30 hardwareambient=14 gintensity=45 gambient=45 skytexture=K15sunst horizontexture=kdn00182 hardwarehorizon=K01dawnn horizontile=2 skycolor=192,141,240,25,32,244 fogswitch=-1 fogcolor=73,73,73,64 skyspeed=3 density=0,0,4000 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m21_ globalintensity=40 hardwareintensity=22 hardwareambient=9 gintensity=45 gambient=45 skytexture=K09wtday horizontexture=kdn03241 hardwarehorizon=K03dawnn horizontile=2 skycolor=241,140,240,30,32,88 fogswitch=-1 fogcolor=64,42,42,128 skyspeed=3 density=0,0,10000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m22_ globalintensity=40 hardwareintensity=20 hardwareambient=8 gintensity=45 gambient=45 skytexture=K12wtday horizontexture=kdn03241 hardwarehorizon=K03dawnn horizontile=2 skycolor=241,139,240,30,32,104 fogswitch=-1 fogcolor=64,49,42,254 skyspeed=3 density=-10000,0,7000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m23_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K10wtday horizontexture=k2207247 hardwarehorizon=K07withz horizontile=2 skycolor=206,250,246,30,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=3 density=0,0,35000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m24_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K19wtday horizontexture=kx6wtday hardwarehorizon=K07withz horizontile=2 skycolor=203,255,203,25,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=2 density=-28000,0.9,10000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m25_ globalintensity=40 hardwareintensity=18 hardwareambient=10 gintensity=45 gambient=45 skytexture=K09wtday horizontexture=kdn00182 hardwarehorizon=K05dawnn horizontile=2 skycolor=192,140,240,30,32,242 fogswitch=-1 fogcolor=36,36,36,64 skyspeed=3 density=0,0,40000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m26_ globalintensity=40 hardwareintensity=18 hardwareambient=10 gintensity=45 gambient=45 skytexture=K15sunst horizontexture=kx03suns hardwarehorizon=K06dawnn horizontile=2 skycolor=64,140,240,23,32,97 fogswitch=-1 fogcolor=91,50,30,64 skyspeed=2 density=0,0,10000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m27_ globalintensity=40 hardwareintensity=17 hardwareambient=9 gintensity=45 gambient=45 skytexture=K12wtday horizontexture=kx09suns hardwarehorizon=K02night horizontile=2 skycolor=64,100,240,30,240,242 fogswitch=-1 fogcolor=36,36,36,64 skyspeed=2 density=0,0,40000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=m28_ globalintensity=30 hardwareintensity=30 hardwareambient=10 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=K01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,64 skyspeed=.2 density=0,0,30000 hambient=52,27,13 l1=82,82,82,0,1,0 l2=140,188,213,-1,-1,0 gl=180,180,180
+
+mission=m29_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K14wtday horizontexture=kx6wtday hardwarehorizon=K07withz horizontile=2 skycolor=203,254,246,40,204,207 fogswitch=1 fogcolor=171,213,255,254 skyspeed=2 density=-50000,0,.005 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=m30_ globalintensity=30 hardwareintensity=30 hardwareambient=10 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=K01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,64 skyspeed=.2 density=0,0,30000 hambient=52,27,13 l1=82,82,82,0,1,0 l2=140,188,213,-1,-1,0 gl=180,180,180
+
+mission=m31_ globalintensity=40 hardwareintensity=20 hardwareambient=9 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kx10suns hardwarehorizon=K02dawnn horizontile=2 skycolor=97,140,240,30,32,106 fogswitch=-1 fogcolor=119,92,79,64 skyspeed=3 density=0,0,20000 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m32_ globalintensity=40 hardwareintensity=20 hardwareambient=9 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kdn03241 hardwarehorizon=K02dawnn horizontile=2 skycolor=241,140,240,30,32,106 fogswitch=-1 fogcolor=119,92,79,64 skyspeed=3 density=0,0,19000 hambient=34,21,31 l1=200,200,200,0,1,0 l2=221,200,180,-1,-1,0 gl=240,201,167
+
+mission=m33_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kx4wtday hardwarehorizon=K01snowz horizontile=2 skycolor=194,254,254,23,204,254 fogswitch=1 fogcolor=255,255,255,64 skyspeed=3 density=0,0,25000 hambient=66,100,105 l1=212,247,252,0,1,0 l2=210,218,230,-1,-1,0 gl=146,196,203
+
+mission=m34_ globalintensity=30 hardwareintensity=39 hardwareambient=14 gintensity=45 gambient=45 skytexture=K06wtday horizontexture=kx09suns hardwarehorizon=K03snowz horizontile=2 skycolor=64,139,240,20,64,204 fogswitch=-1 fogcolor=116,144,173,64 skyspeed=2 density=0,0,6000 hambient=66,100,105 l1=160,160,200,0,1,0 l2=255,158,115,-1,-1,0 gl=207,153,123
+
+mission=m35_ globalintensity=45 hardwareintensity=70 hardwareambient=18 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kx6wtday hardwarehorizon=K01snowz horizontile=2 skycolor=203,254,254,23,204,254 fogswitch=1 fogcolor=255,255,255,64 skyspeed=2 density=35000,0,20000 hambient=66,100,105 l1=212,247,252,0,1,0 l2=210,218,230,-1,-1,0 gl=146,196,203
+
+mission=m36_ globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kx7wtday hardwarehorizon=K01snowz horizontile=2 skycolor=194,254,254,23,204,254 fogswitch=1 fogcolor=255,255,255,64 skyspeed=3 density=35000,0,20000 hambient=66,100,105 l1=212,247,252,0,1,0 l2=210,218,230,-1,-1,0 gl=146,196,203
+
+mission=ran1 globalintensity=40 hardwareintensity=20 hardwareambient=9 gintensity=45 gambient=45 skytexture=K11wtday horizontexture=kdn00182 hardwarehorizon=K02dawnn horizontile=2 skycolor=192,140,240,30,32,106 fogswitch=-1 fogcolor=119,92,79,64 skyspeed=3 density=0,0,19000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=ran2 globalintensity=45 hardwareintensity=80 hardwareambient=20 gintensity=45 gambient=45 skytexture=K10wtday horizontexture=kx6wtday hardwarehorizon=K07withz horizontile=2 skycolor=203,255,203,47,204,207 fogswitch=1 fogcolor=171,213,255,64 skyspeed=3 density=0,0,30000 hambient=19,48,72 l1=248,250,213,0,1,0 l2=230,223,210,-1,-1,0 gl=197,197,152
+
+mission=ran3 globalintensity=40 hardwareintensity=18 hardwareambient=10 gintensity=45 gambient=45 skytexture=K15sunst horizontexture=kdn03241 hardwarehorizon=K06dawnn horizontile=2 skycolor=241,140,240,23,32,97 fogswitch=-1 fogcolor=91,50,30,64 skyspeed=2 density=0,0,10000 hambient=83,66,58 l1=156,133,122,0,1,0 l2=196,172,160,-1,-1,0 gl=207,153,123
+
+mission=ran4 globalintensity=30 hardwareintensity=30 hardwareambient=10 gintensity=45 gambient=45 skytexture=K01stars horizontexture=kx1night hardwarehorizon=K01night horizontile=2 skycolor=240,254,240,60,240,240 fogswitch=-1 fogcolor=0,0,0,64 skyspeed=.2 density=0,0,30000 hambient=15,13,52 l1=82,82,82,0,1,0 l2=140,188,213,-1,-1,0 gl=180,180,180

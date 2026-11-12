@@ -1,0 +1,43 @@
+s#mlu
+
+# Boulders Material Definitions
+
+bouldaaa
+	type true_perspective
+        shade_index     8
+        shade_ramp      8
+        texture boulde03
+	rgb 145 145 145
+end
+
+bouldaab
+	type true_perspective
+        shade_index     8
+        shade_ramp      8
+        texture boulde31
+	rgb 145 145 145
+end
+
+bouldaac
+	type true_perspective
+        shade_index     8
+        shade_ramp      8
+        texture boulde32
+	rgb 145 145 145
+end
+
+bouldaad
+	type true_perspective
+        shade_index     8
+        shade_ramp      8
+        texture boulde33
+	rgb 145 145 145
+end
+
+bouldaae
+	type true_perspective
+        shade_index     8
+        shade_ramp      8
+        texture boulde34
+	rgb 145 145 145
+end

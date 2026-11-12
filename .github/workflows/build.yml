@@ -1,0 +1,121 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  SDL3_VERSION: 3.2.24
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache SDL3
+        id: sdl3
+        uses: actions/cache@v4
+        with:
+          path: ~/sdl3
+          key: sdl3-linux-${{ env.SDL3_VERSION }}
+      - name: Build SDL3
+        if: steps.sdl3.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl1-mesa-dev libgl1-mesa-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev
+          curl -sSL -o sdl.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-$SDL3_VERSION/SDL3-$SDL3_VERSION.tar.gz
+          tar xzf sdl.tar.gz
+          cmake -S SDL3-$SDL3_VERSION -B sdlbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX=$HOME/sdl3
+          cmake --build sdlbuild
+          cmake --install sdlbuild
+      - name: Build
+        run: |
+          export PKG_CONFIG_PATH=$HOME/sdl3/lib/pkgconfig:$HOME/sdl3/lib64/pkgconfig
+          # the release bundles only SDL3: no FFmpeg (cutscenes need a build from source with it)
+          make MOVIES=0
+          make check
+      - name: Package
+        run: |
+          mkdir -p dist/hg-port
+          cp heavygear hgview hgprj dist/hg-port/
+          cp $HOME/sdl3/lib*/libSDL3.so.0* dist/hg-port/ 2>/dev/null || true
+          patchelf --version >/dev/null 2>&1 || sudo apt-get install -y patchelf
+          patchelf --set-rpath '$ORIGIN' dist/hg-port/hgview
+          patchelf --set-rpath '$ORIGIN' dist/hg-port/heavygear
+          cp -r README.md FOLDER_SETUP.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
+          tar czf dist/hg-port-linux-x86_64.tar.gz -C dist hg-port
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/hg-port-linux-x86_64.tar.gz
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          brew install sdl3
+          make MOVIES=0
+          make check
+      - name: Package
+        run: |
+          mkdir -p dist/hg-port
+          cp heavygear hgview hgprj dist/hg-port/
+          SDLLIB=$(otool -L hgview | awk '/libSDL3/ {print $1}')
+          cp "$SDLLIB" dist/hg-port/
+          install_name_tool -change "$SDLLIB" "@executable_path/$(basename "$SDLLIB")" dist/hg-port/hgview
+          install_name_tool -change "$SDLLIB" "@executable_path/$(basename "$SDLLIB")" dist/hg-port/heavygear
+          install_name_tool -id "@executable_path/$(basename "$SDLLIB")" "dist/hg-port/$(basename "$SDLLIB")"
+          codesign --force -s - "dist/hg-port/$(basename "$SDLLIB")" dist/hg-port/heavygear dist/hg-port/hgview dist/hg-port/hgprj
+          lipo dist/hg-port/hgview -verify_arch arm64
+          cp -r README.md FOLDER_SETUP.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
+          cd dist && zip -qry hg-port-macos-arm64.zip hg-port
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/hg-port-macos-arm64.zip
+
+  windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (MinGW-w64 cross)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+          curl -sSL -o sdl.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-$SDL3_VERSION/SDL3-devel-$SDL3_VERSION-mingw.tar.gz
+          tar xzf sdl.tar.gz
+          make WINDOWS=1 CC=x86_64-w64-mingw32-gcc SDL3_DIR=$PWD/SDL3-$SDL3_VERSION/x86_64-w64-mingw32 \
+            LDFLAGS="-static-libgcc" hgprj.exe hgview.exe heavygear.exe test_data.exe
+      - name: Package
+        run: |
+          mkdir -p dist/hg-port
+          cp heavygear.exe hgview.exe hgprj.exe SDL3-$SDL3_VERSION/x86_64-w64-mingw32/bin/SDL3.dll dist/hg-port/
+          cp -r README.md FOLDER_SETUP.md CHANGELOG.md KNOWN_ISSUES.md LICENSE docs gamedata dist/hg-port/
+          cd dist && zip -qr hg-port-windows-x64.zip hg-port
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/hg-port-windows-x64.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: false

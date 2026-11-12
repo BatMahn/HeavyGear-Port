@@ -1,0 +1,32 @@
+#tlu
+
+# Explosion Texture Maps
+
+"Big Bldg Expd"    bigbldex
+"Big Explosion"    bigexpls
+"Building Expl"    buildexp
+"Dirt Puff"        dirtpuff
+"Explosion"        explsion
+"Small Fire"       smalfire
+"Gear Death"       geardeth
+"Ground Explod"    grndexpl
+"Flaming Objct"    flamgrnd
+"Smoke Column"     smokecol
+"Nuke Explosion"   nukeexpl
+"Cannon Mzl Flash" cnmzlfls
+"Mgun Mzl Flash"   mgmzlfls
+"Rocket Mzl Flash" rcmzlfls
+"Railgun Trail"    railgntr
+"Cannon Hit"       cannonht
+"Laser Hit"        laserhit
+
+# Projectile Texture Maps
+
+"Tracer Fire"	   tracerfr
+"Dark Grey"	   darkgrey
+"Artillry Shell"   artshell
+"Mortar"	   mortarsh
+"Grenade"	   grenadem
+"Rocket"	   rocketmp
+"Missile"	   missilem
+"Bazooka"	   bazookam

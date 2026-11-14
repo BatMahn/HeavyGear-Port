@@ -8,7 +8,7 @@ traced. Heavy Gear runs on a later generation of the MechWarrior 2 engine. The M
 compare against, never as code: every format and value here is taken from Heavy Gear's own binaries and data.
 Portable C99 with SDL3; builds on macOS, Linux and Windows. You need your own copy of the game's two CDs (see "Setting up the game folder": no installation needed).
 
-## Status (2026-11-12, v1.0.0)
+## Status (2026-11-13, v1.0.1)
 
 **Playable.** The story campaign, training, Tour of Duty (with the original's random mission generator) and LAN
 multiplayer, with the original's AI, gear simulation, animations, HUD, views, sounds and both looks (SOFTWARE and 3D).
@@ -55,7 +55,8 @@ KNOWN_ISSUES.md lists what is still open.
 
 Needs a C99 compiler, make, pkg-config and SDL3 3.2 or newer (development files). For the cutscenes (Indeo 5 AVIs)
 also FFmpeg's libavformat / libavcodec (development files); the Makefile uses them when pkg-config finds them
-(`make MOVIES=0` leaves them out).
+(`make MOVIES=0` leaves them out). `tools/build_ffmpeg.sh` builds the small static FFmpeg the releases use (AVI, Indeo,
+PCM / ADPCM only).
 
 ```
 make            # heavygear (front end), hgview (the viewer), hgprj (archive tool), test_data
@@ -63,8 +64,8 @@ make check      # unit tests; add GAME=/path/to/game to also parse every model a
 ```
 
 On macOS: `brew install sdl3 ffmpeg`. Windows builds are cross-compiled with MinGW-w64 (see the Makefile header). Tagged
-releases (`v*`) are built by GitHub Actions on https://github.com/BatMahn/HeavyGear-Port: macOS (Apple Silicon), Linux x86_64 and Windows x64, without FFmpeg (no
-cutscenes; build from source with FFmpeg installed for them).
+releases (`v*`) are built by GitHub Actions on https://github.com/BatMahn/HeavyGear-Port: macOS (Apple Silicon), Linux
+x86_64 and Windows x64, each with that FFmpeg linked in (the cutscenes play).
 
 ## Setting up the game folder
 
@@ -165,8 +166,7 @@ tracks in any one of these ways (it tries them in this order):
        ...
        HeavyGear/music/track12.wav       (or track02.ogg ... / track02.mp3 ...)
 
-   FLAC isn't read: convert it to WAV, Ogg or MP3 first (e.g. `ffmpeg -i track02.flac track02.ogg`). When a track has
-   several files, WAV wins, then Ogg, then MP3. `wavmap.ini` paths may name Ogg and MP3 files too.
+   FLAC rips (`track02.flac`) are read too. When a track has several files, WAV wins, then Ogg, then MP3. `wavmap.ini` paths may name Ogg and MP3 files too.
 3. **An image of disc 2** in the game folder or a `cd` subfolder: an Alcohol 120% `.mds` + `.mdf` pair, or a
    `.cue` + `.bin` (raw 2352-byte sectors, one BIN file). The port plays the audio tracks straight out of the image -
    and finds the cutscenes in it too. A plain `.iso` holds only the data track (no music).
@@ -178,7 +178,8 @@ Without any of them the missions are silent apart from their sound effects.
 Disc 2's `VIDEO\` folder (186 MB of AVI files): copy it into the game folder as `VIDEO\`, or put disc 2's image there
 (the `.mds` / `.cue` image above, or an `.iso` / `.bin`, in the game folder or `cd\`), or point `wavmap.ini`'s
 `DVDMoviePath=` at a folder holding them (the original's setting, relative to the game folder). The movies are Indeo 5
-video: the port plays them only when it was built with FFmpeg (see "Build"); otherwise they're skipped.
+video, decoded by FFmpeg: the releases have it built in; a build of your own needs FFmpeg (see "Build"), otherwise
+they're skipped.
 
     macOS / Linux:  cp -R /Volumes/HEAVYG/VIDEO ~/HeavyGear/
     Windows:        xcopy D:\VIDEO C:\Games\HeavyGear\VIDEO\ /E /I
@@ -206,6 +207,8 @@ heavygear <game folder>                  the front end and the game; in a missio
                                          outside, F10 missile view, F9 target display, F8 map, F11 HUD, Z zoom, X radar
                                          zoom; F1 mission channel, F2-F7 squad mates, F12 objectives; Esc the menu;
                                          Ctrl + ` free camera; L the look
+heavygear <game folder> -w              in a window (it starts in borderless full screen; Alt+Enter switches at any
+                                         time; HG_WINDOWED=1 does the same as -w)
 heavygear with HG_MISSION=m01            a mission straight away (HG_GEAR picks the gear); HG_NET_HOST=<port> /
                                          HG_NET_JOIN=<host>:<port> a LAN game on that mission
 hgview <game folder> m01                 mission 1 from the player's start (WASD / arrows, mouse drag to look, Q / E

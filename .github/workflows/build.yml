@@ -8,6 +8,8 @@ on:
 
 env:
   SDL3_VERSION: 3.2.24
+  # the cutscenes' decoder: a small static FFmpeg (AVI + Indeo + PCM / ADPCM only, LGPL), tools/build_ffmpeg.sh
+  FFMPEG_VERSION: 7.1.1
 
 jobs:
   linux:
@@ -33,11 +35,23 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$HOME/sdl3
           cmake --build sdlbuild
           cmake --install sdlbuild
+      - name: Cache FFmpeg
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-linux-${{ env.FFMPEG_VERSION }}-${{ hashFiles('tools/build_ffmpeg.sh') }}
+      - name: Build FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y nasm
+          curl -sSL -o ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz
+          tar xJf ffmpeg.tar.xz
+          sh tools/build_ffmpeg.sh ffmpeg-$FFMPEG_VERSION $HOME/ffmpeg 
       - name: Build
         run: |
-          export PKG_CONFIG_PATH=$HOME/sdl3/lib/pkgconfig:$HOME/sdl3/lib64/pkgconfig
-          # the release bundles only SDL3: no FFmpeg (cutscenes need a build from source with it)
-          make MOVIES=0
+          export PKG_CONFIG_PATH=$HOME/sdl3/lib/pkgconfig:$HOME/sdl3/lib64/pkgconfig:$HOME/ffmpeg/lib/pkgconfig
+          make MOVIES=1 AV_LIBS="$(pkg-config --static --libs libavformat libavcodec libavutil)"
           make check
       - name: Package
         run: |
@@ -58,10 +72,24 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Cache FFmpeg
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-macos-${{ env.FFMPEG_VERSION }}-${{ hashFiles('tools/build_ffmpeg.sh') }}
+      - name: Build FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          brew install nasm
+          curl -sSL -o ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz
+          tar xJf ffmpeg.tar.xz
+          sh tools/build_ffmpeg.sh ffmpeg-$FFMPEG_VERSION $HOME/ffmpeg 
       - name: Build
         run: |
           brew install sdl3
-          make MOVIES=0
+          export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig:$PKG_CONFIG_PATH
+          make MOVIES=1 AV_LIBS="$(pkg-config --static --libs libavformat libavcodec libavutil)"
           make check
       - name: Package
         run: |
@@ -85,14 +113,31 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Build (MinGW-w64 cross)
+      - name: Toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64
+          sudo apt-get install -y mingw-w64 nasm
+      - name: Cache FFmpeg
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-mingw64-${{ env.FFMPEG_VERSION }}-${{ hashFiles('tools/build_ffmpeg.sh') }}
+      - name: Build FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          true
+          curl -sSL -o ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz
+          tar xJf ffmpeg.tar.xz
+          sh tools/build_ffmpeg.sh ffmpeg-$FFMPEG_VERSION $HOME/ffmpeg x86_64-w64-mingw32-
+      - name: Build (MinGW-w64 cross)
+        run: |
           curl -sSL -o sdl.tar.gz https://github.com/libsdl-org/SDL/releases/download/release-$SDL3_VERSION/SDL3-devel-$SDL3_VERSION-mingw.tar.gz
           tar xzf sdl.tar.gz
-          make WINDOWS=1 CC=x86_64-w64-mingw32-gcc SDL3_DIR=$PWD/SDL3-$SDL3_VERSION/x86_64-w64-mingw32 \
-            LDFLAGS="-static-libgcc" hgprj.exe hgview.exe heavygear.exe test_data.exe
+          export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig
+          make WINDOWS=1 MOVIES=1 CC=x86_64-w64-mingw32-gcc SDL3_DIR=$PWD/SDL3-$SDL3_VERSION/x86_64-w64-mingw32 \
+            LDFLAGS="-static-libgcc" AV_LIBS="$(pkg-config --static --libs libavformat libavcodec libavutil)" \
+            hgprj.exe hgview.exe heavygear.exe test_data.exe
       - name: Package
         run: |
           mkdir -p dist/hg-port

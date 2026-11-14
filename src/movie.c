@@ -345,7 +345,7 @@ int movie_play(SDL_Renderer *ren, const char *game_dir, const char *name)
                     SDL_Event e;
                     while (SDL_PollEvent(&e)) {
                         if (e.type == SDL_EVENT_QUIT) { stop = 1; ret = 1; }
-                        if (e.type == SDL_EVENT_KEY_DOWN || (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)) stop = 1;   /* WM_KEYDOWN, WM_LBUTTONDOWN (0x10022dce) */
+                        if ((e.type == SDL_EVENT_KEY_DOWN && !(e.key.mod & SDL_KMOD_ALT)) || (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)) stop = 1;   /* WM_KEYDOWN, WM_LBUTTONDOWN (0x10022dce) */
                     }
                     if (stop || (double)(SDL_GetTicks() - t0) / 1000.0 >= at) break;
                     SDL_Delay(2);
@@ -377,7 +377,7 @@ int movie_play(SDL_Renderer *ren, const char *game_dir, const char *name)
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) { stop = 1; ret = 1; }
-            if (e.type == SDL_EVENT_KEY_DOWN || (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)) stop = 1;   /* WM_KEYDOWN, WM_LBUTTONDOWN (0x10022dce) */
+            if ((e.type == SDL_EVENT_KEY_DOWN && !(e.key.mod & SDL_KMOD_ALT)) || (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT)) stop = 1;   /* WM_KEYDOWN, WM_LBUTTONDOWN (0x10022dce) */
         }
         SDL_Delay(10);
     }

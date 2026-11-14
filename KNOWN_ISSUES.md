@@ -87,6 +87,7 @@ differently from the original, by area.
 
 ## Ports and build
 
-- Movies need the port built with FFmpeg (Indeo 5); without it they're skipped.
+- The releases have FFmpeg built in for the movies (Indeo 5); a build of your own needs FFmpeg for them, otherwise
+  they're skipped.
 - Generated missions (Tour of Duty, multiplayer) are written into the game folder as RAN*.BWD / RAND*.BWD files, as
   the original does.

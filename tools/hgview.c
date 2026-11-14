@@ -113,7 +113,10 @@ int main(int argc, char **argv)
     if (!SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     SDL_Window *win;
     SDL_Renderer *ren;
-    if (!SDL_CreateWindowAndRenderer("Heavy Gear - hgview", 960, 600, SDL_WINDOW_RESIZABLE, &win, &ren)) return 1;
+    /* a window by default (a viewer); HGVIEW_FULLSCREEN=1 starts in borderless full screen, Alt+Enter switches */
+    int full = getenv("HGVIEW_FULLSCREEN") && strcmp(getenv("HGVIEW_FULLSCREEN"), "0");
+    if (!SDL_CreateWindowAndRenderer("Heavy Gear - hgview", 960, 600, SDL_WINDOW_RESIZABLE | (full ? SDL_WINDOW_FULLSCREEN : 0),
+                                     &win, &ren)) return 1;
     if (!(getenv("HGVIEW_MUSIC") && !strcmp(getenv("HGVIEW_MUSIC"), "0")) && !audio_open()) {
         int t = world_music(w);
         if (t > 0) printf("music: track %d %s\n", t, audio_music_track(argv[1], t) ? "not found (see audio.h)" : "playing");
@@ -125,6 +128,10 @@ int main(int argc, char **argv)
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE)) run = 0;
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT) && !e.key.repeat) {
+                SDL_SetWindowFullscreenMode(win, NULL);
+                SDL_SetWindowFullscreen(win, !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
+            }
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_H) show_hud = !show_hud;
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_L) {
                 static int sw = 0;

@@ -2,6 +2,16 @@
 
 Heavy Gear native port by BatMahn - https://github.com/BatMahn/HeavyGear-Port
 
+## v1.0.1 (2026-11-13)
+
+- **Cutscenes in the releases.** The Windows, macOS and Linux builds now have a small static FFmpeg linked in (AVI,
+  Indeo 3 / 4 / 5, Cinepak, PCM / ADPCM only; LGPL, built by the new `tools/build_ffmpeg.sh`), so the intro and the
+  campaign's movies play instead of "this build has no video decoder". Checked against disc 2's own AVIs.
+- **Borderless full screen.** heavygear starts in borderless full screen on the desktop's mode (no border or title
+  bar), the picture letterboxed to 4:3; `-w` / `--windowed` (or HG_WINDOWED=1) starts in a window, and Alt+Enter
+  switches at any time (hgview too; HGVIEW_FULLSCREEN=1 starts it full screen). Alt+Enter no longer also cycles the
+  weapon, presses the shell's Enter or skips a movie.
+
 ## v1.0.0 (2026-11-12)
 
 The first full release: the game is playable end to end. Everything below is traced from HGSIM / HGSHELL / the

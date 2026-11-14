@@ -1148,7 +1148,7 @@ static int run_mission(SDL_Renderer *ren, SDL_Texture *tx, hg_archive *a, const 
                 }
                 if (kc == SDLK_N) nav = next_nav(world_mission(w), nav, shift ? -1 : 1);
                 /* weapon_cycle: Enter (KEYBOARD.MAP) */
-                if (kc == SDLK_RETURN && hd) {
+                if (kc == SDLK_RETURN && hd && !(e.key.mod & SDL_KMOD_ALT)) {
                     combat_cycle(pcp);
                     sfx_flat("AFXHDWPS", 0, 0, 0x32);   /* 0x100620b8 */
                     for (int i = 0; i < g.nweapons; i++) g.weapon[i].ammo = pcp->ammo[i];
@@ -1893,6 +1893,20 @@ static int run_mission(SDL_Renderer *ren, SDL_Texture *tx, hg_archive *a, const 
     return quit || fled ? -1 : result;
 }
 
+/* Alt+Enter: borderless full screen (SDL3's desktop-mode fullscreen, no border or title bar) <-> a window; the cursor
+ * stays the system's (the shell's screens use it) */
+static bool SDLCALL fullscreen_toggle(void *ud, SDL_Event *e)
+{
+    SDL_Window *win = ud;
+    if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && (e->key.key == SDLK_RETURN || e->key.key == SDLK_KP_ENTER) &&
+        (e->key.mod & SDL_KMOD_ALT)) {
+        int fs = (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0;
+        SDL_SetWindowFullscreenMode(win, NULL);
+        SDL_SetWindowFullscreen(win, !fs);
+    }
+    return true;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) { fprintf(stderr, "usage: heavygear <game folder>\n"); return 2; }
@@ -1951,9 +1965,15 @@ int main(int argc, char **argv)
         front_close(fe);
         return 0;
     }
+    /* borderless full screen on the desktop's mode by default (the picture letterboxed to 4:3); `-w` / --windowed or
+     * HG_WINDOWED=1 starts in a window; Alt+Enter switches at any time */
+    int windowed = getenv("HG_WINDOWED") && strcmp(getenv("HG_WINDOWED"), "0");
+    for (int i = 2; i < argc; i++) if (!strcmp(argv[i], "-w") || !strcmp(argv[i], "--windowed")) windowed = 1;
     SDL_Window *win;
     SDL_Renderer *ren;
-    if (!SDL_CreateWindowAndRenderer("Heavy Gear", 1280, 960, SDL_WINDOW_RESIZABLE, &win, &ren)) return 1;
+    if (!SDL_CreateWindowAndRenderer("Heavy Gear", 1280, 960, SDL_WINDOW_RESIZABLE | (windowed ? 0 : SDL_WINDOW_FULLSCREEN),
+                                     &win, &ren)) return 1;
+    SDL_AddEventWatch(fullscreen_toggle, win);
     SDL_SetRenderLogicalPresentation(ren, 640, 480, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     SDL_Texture *tx = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 480);
     SDL_SetTextureScaleMode(tx, SDL_SCALEMODE_NEAREST);
@@ -2030,7 +2050,7 @@ int main(int argc, char **argv)
                 if (e.key.key == SDLK_LEFT) front_key(fe, 0x25);
                 if (e.key.key == SDLK_RIGHT) front_key(fe, 0x27);
                 if (e.key.key == SDLK_DELETE) front_key(fe, 0x2e);
-                if (e.key.key == SDLK_RETURN) front_key(fe, 0x0d);
+                if (e.key.key == SDLK_RETURN && !(e.key.mod & SDL_KMOD_ALT)) front_key(fe, 0x0d);
             }
         }
         {

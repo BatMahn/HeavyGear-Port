@@ -8,7 +8,7 @@ traced. Heavy Gear runs on a later generation of the MechWarrior 2 engine. The M
 compare against, never as code: every format and value here is taken from Heavy Gear's own binaries and data.
 Portable C99 with SDL3; builds on macOS, Linux and Windows. You need your own copy of the game's two CDs (see "Setting up the game folder": no installation needed).
 
-## Status (2026-11-13, v1.0.1)
+## Status (2026-11-20, v1.0.2)
 
 **Playable.** The story campaign, training, Tour of Duty (with the original's random mission generator) and LAN
 multiplayer, with the original's AI, gear simulation, animations, HUD, views, sounds and both looks (SOFTWARE and 3D).

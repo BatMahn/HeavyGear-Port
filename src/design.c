@@ -826,7 +826,7 @@ int design_write(const design *g, const char *dir, const char *file)
 {
     if (!g->gdf) return -1;
     char path[1100];
-    fs_join(path, sizeof path, dir, file);
+    if (fs_find_ci(dir, file, path, sizeof path)) fs_join(path, sizeof path, dir, file);
     FILE *f = fopen(path, "wb");
     if (!f) return -1;
     int ok = fwrite(g->gdf, 1, g->len, f) == g->len;

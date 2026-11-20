@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <strings.h>
 
 #define PI_F 3.14159265f
 
@@ -193,13 +194,31 @@ void views_ordinance(const float pos[3], const float vel[3], camera *cam)
     cam->pitch = 0;
 }
 
-void views_player_parts(world *w, const unit *u, int show)
+/* the record named dum_rash, else rash (0x100c4c8e: two 0x1004dfa3 lookups; the tag is the name's characters 4..7) */
+static int arm_rec(const gearmodel *g)
+{
+    for (int r = 0; r < g->nrec; r++) if (!strcasecmp(g->rec_tag[r], "rash")) return r;
+    return -1;
+}
+
+static int under(const gearmodel *g, int rec, int top)
+{
+    for (int n = 0; rec >= 0 && n < 96; n++, rec = g->rec_parent[rec]) if (rec == top) return 1;
+    return 0;
+}
+
+void views_player_parts(world *w, const unit *u, int show, int cockpit)
 {
     float s = sinf(u->s.heading * PI_F / 180), c = cosf(u->s.heading * PI_F / 180);
+    int arm = cockpit ? arm_rec(&u->gm) : -1;
     for (int k = 0; k < u->gm.nparts; k++) {
         if (u->obj[k] < 0) continue;
         int gone = gearmodel_part_gone(&u->gm, k, u->cb.zone_gone);
-        world_show_object(w, u->obj[k], show && !gone);
+        /* the cockpit draws the vehicle's arm object (and what hangs from it) alone, near plane 8 (0x10090d53) */
+        int in_view = !cockpit || (arm >= 0 && under(&u->gm, u->gm.part[k].rec, arm));
+        world_set_close(w, u->obj[k], cockpit);
+        world_show_object(w, u->obj[k], show && !gone && in_view);
+        if (!in_view) continue;
         if (!show || gone) continue;
         const gearmodel_part *p = &u->gm.part[k];
         world_move_object(w, u->obj[k], u->s.x + p->x * c + p->z * s, u->s.y + p->y, u->s.z - p->x * s + p->z * c,

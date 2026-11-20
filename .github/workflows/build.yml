@@ -136,7 +136,7 @@ jobs:
           tar xzf sdl.tar.gz
           export PKG_CONFIG_PATH=$HOME/ffmpeg/lib/pkgconfig
           make WINDOWS=1 MOVIES=1 CC=x86_64-w64-mingw32-gcc SDL3_DIR=$PWD/SDL3-$SDL3_VERSION/x86_64-w64-mingw32 \
-            LDFLAGS="-static-libgcc" AV_LIBS="$(pkg-config --static --libs libavformat libavcodec libavutil)" \
+            LDFLAGS="-static-libgcc -s" AV_LIBS="$(pkg-config --static --libs libavformat libavcodec libavutil)" \
             hgprj.exe hgview.exe heavygear.exe test_data.exe
       - name: Package
         run: |

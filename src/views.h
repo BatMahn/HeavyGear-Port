@@ -63,6 +63,8 @@ float views_fov(float fov1, float zoom);
 
 /* the player's own gear in the views: its parts placed on its pose and shown (the cockpit too: 0x1002f694 keeps the
  * player's vehicle at detail 0 in the cockpit view, so its gun shows below the eye) or hidden */
-void views_player_parts(world *w, const unit *u, int show);
+/* the player's gear: in the cockpit only its right arm (the dum_rash / rash subtree, gear +0x490) with the near plane
+ * at 8 (0x10090d53), elsewhere every part */
+void views_player_parts(world *w, const unit *u, int show, int cockpit);
 
 #endif

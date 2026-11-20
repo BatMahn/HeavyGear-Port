@@ -915,7 +915,9 @@ front *front_open(hg_archive *a, const char *game_dir)
     if (!f) return NULL;
     f->a = a;
     f->sh = shell_open(a);
-    snprintf(f->path, sizeof f->path, "%s/CHARINFO.HG1", game_dir);
+    /* the save, in whatever letter case the folder has it (a folder copied from Windows may say charinfo.hg1) */
+    if (fs_find_ci(game_dir, "CHARINFO.HG1", f->path, sizeof f->path))
+        snprintf(f->path, sizeof f->path, "%s/CHARINFO.HG1", game_dir);
     snprintf(f->dir, sizeof f->dir, "%s", game_dir);
     options_load(&f->opt, game_dir);
     if (career_load(&f->k, f->path)) fprintf(stderr, "%s: unreadable, starting without games\n", f->path);

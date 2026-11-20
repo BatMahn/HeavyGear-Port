@@ -77,6 +77,8 @@ typedef struct {
     int       order_last, order_last_tgt;
     float     order_last_x;
     anim_player ap;           /* its animation (classes 1 / 9 / 5; 0x10013d53) */
+    float     reach;          /* the farthest its parts' boxes reach from its origin, any axis (units_hit's cull; 0 not
+                               * yet measured) */
     int       body_seen;      /* the fall bits it had (the fall's sound as they come) */
     float     thr_ctl;        /* its last throttle (the control's +8, held while a rule changes the mode) */
     /* the obstacle probe (0x100aa2ac): its avoidance turn's sign (+0x25a, 0 none), the object it avoids (+0x246), the

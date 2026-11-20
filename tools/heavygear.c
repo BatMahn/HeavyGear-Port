@@ -1511,7 +1511,12 @@ static int run_mission(SDL_Renderer *ren, SDL_Texture *tx, hg_archive *a, const 
             if (started == 1 && sim_ticks > player_start) { started = 2; player_active = 1; obj.player_running = 1; sfx_flat("AFXHBEEP", 0, 0, 0x32); }
         }
         units_update(&us, w);
-        if (pi >= 0) views_player_parts(w, &us.u[pi], 1);
+        {
+            /* the near plane (camera +0x3c): the 640-wide view's 161, 8 in the track view (view mode 1) */
+            int cockpit = !free_cam && vw.view == VIEW_COCKPIT;
+            world_set_near(w, !free_cam && vw.view == VIEW_TRACK ? 8.0f : 0.0f);
+            if (pi >= 0) views_player_parts(w, &us.u[pi], 1, cockpit);
+        }
         world_set_time(w, (float)(now - start) / 1000.0f);
         {
             /* shots in flight: projectiles as their kind's model (world_set_shots: turned as fired, a guided one
@@ -1895,9 +1900,28 @@ static int run_mission(SDL_Renderer *ren, SDL_Texture *tx, hg_archive *a, const 
 
 /* Alt+Enter: borderless full screen (SDL3's desktop-mode fullscreen, no border or title bar) <-> a window; the cursor
  * stays the system's (the shell's screens use it) */
+/* in full screen the pointer is kept on the 4:3 picture, not in the side bars (the shell's screens read it there) */
+static void confine_pointer(SDL_Window *win)
+{
+    SDL_Renderer *ren = SDL_GetRenderer(win);
+    int ww, wh, pw, ph;
+    SDL_FRect r;
+    if (!(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) || !ren || !SDL_GetRenderLogicalPresentationRect(ren, &r) ||
+        !SDL_GetWindowSize(win, &ww, &wh) || !SDL_GetCurrentRenderOutputSize(ren, &pw, &ph) || pw <= 0 || ph <= 0) {
+        SDL_SetWindowMouseRect(win, NULL);
+        return;
+    }
+    float sx = (float)ww / (float)pw, sy = (float)wh / (float)ph;   /* output pixels -> window points (Retina) */
+    SDL_Rect m = {(int)(r.x * sx + 0.5f), (int)(r.y * sy + 0.5f), (int)(r.w * sx), (int)(r.h * sy)};
+    SDL_SetWindowMouseRect(win, &m);
+}
+
 static bool SDLCALL fullscreen_toggle(void *ud, SDL_Event *e)
 {
     SDL_Window *win = ud;
+    if (e->type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN || e->type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN ||
+        e->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
+        confine_pointer(win);
     if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && (e->key.key == SDLK_RETURN || e->key.key == SDLK_KP_ENTER) &&
         (e->key.mod & SDL_KMOD_ALT)) {
         int fs = (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0;
@@ -1975,6 +1999,7 @@ int main(int argc, char **argv)
                                      &win, &ren)) return 1;
     SDL_AddEventWatch(fullscreen_toggle, win);
     SDL_SetRenderLogicalPresentation(ren, 640, 480, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    confine_pointer(win);
     SDL_Texture *tx = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 480);
     SDL_SetTextureScaleMode(tx, SDL_SCALEMODE_NEAREST);
     SDL_StartTextInput(win);

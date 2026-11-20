@@ -100,6 +100,10 @@ int    world_ray(const world *w, const float p0[3], const float p1[3], float *t)
 /* the same, with the struck polygon's normal's world y in *ny */
 int    world_ray_n(const world *w, const float p0[3], const float p1[3], float *t, float *ny);
 void   world_set_solid(world *w, int id, int on);
+/* the view's near plane (0: the 640-wide view's 161, 0x100b8496; 8 in the track view); an instance drawn with the near
+ * plane at 8 (the player's own arm in the cockpit, 0x10090d53) */
+void   world_set_near(world *w, float near_z);
+void   world_set_close(world *w, int id, int on);
 /* the OBJ flags (mission_obj.flags) of the mission object an instance draws, 0 if none */
 unsigned world_object_flags(const world *w, int id);
 /* the sim object's kind (+0x34, 0x100c058b -> 0x100224c0): the OBJ's +0xc (outside 0..8: 4), 8 for the "tl1m"

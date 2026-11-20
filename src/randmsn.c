@@ -57,6 +57,8 @@ const char *rmg_type_name(int t)
 
 static void path_of(const hg_archive *a, const char *name, char *out, size_t n)
 {
+    /* an existing file in any letter case is the one rewritten (the archive's lookup reads it case-insensitively) */
+    if (!fs_find_ci(hga_dir(a), name, out, n)) return;
     fs_join(out, n, hga_dir(a), name);
 }
 

@@ -1924,6 +1924,19 @@ use tracks 2-9; the game CD has audio tracks 2-12. The shell itself plays no mus
   0x1002f02b the 0x107cb500 objects from their +0x74 flags).
 - 0x100012c5 (re-checked): the software branch hands I76DRAW row << 3 (no | 7), the 3D branch row << 3 | 7.
 
+## The near plane and the cockpit's own vehicle (traced: HGSIM 0x100b8496, 0x10092667, 0x10090d53, 0x10037a72)
+
+- The camera's +0x3c is the near plane: 0x100b8496 sets it to half the view's width x 0.5 + 1 (161 for 640 wide);
+  0x10092667 clips polygons at z >= +0x3c. View mode 1 (the track view) saves it and uses 8 (0x41000000) while it lasts.
+- In the cockpit (0x10037a72 sets 0x101316f4 = 1) the draw of the player's own vehicle (0x10090d53: its record's
+  +0x24 the player, flag 0x100) draws only its object +0x490 and what hangs from it, with +0x3c = 8 for that draw:
+  +0x490 is found by name at load, "dum_rash", else "rash" (0x100c4c8e / 0x100c4cd8 -> 0x1004dfa3): the right arm.
+
+## The scene test's reach
+
+- 0x100229d9 tests every object; vehicle parts reach far from the vehicle's origin (the Orca 1,634, the Raptor 3,995,
+  v23vgun1 4,509, Draco 2,709, v60wfish 2,328), so a port-side cull must use each vehicle's own reach.
+
 ## Running the original for reference (findings from Windows 98 / Wine attempts)
 
 - **Direct mission launch.** HG.EXE with any command line skips the shell and starts the sim directly (0x402710). The sim

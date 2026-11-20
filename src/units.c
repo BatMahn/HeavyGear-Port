@@ -272,9 +272,25 @@ int units_hit(const units *us, const world *w, int owner, const float p0[3], con
         /* wrecks stay in the scene and stop shots (0x100229d9 tests every object but the firer's; 0x1005c1f8 harms no
          * dead vehicle: combat_damage_raw) */
         if (i == owner || !u->placed) continue;
-        /* reject segments nowhere near (the parts lie within a few hundred units of the origin) */
-        float cx = u->s.x, cy = u->s.y, cz = u->s.z;
-        float lo[3] = {cx - 1500, cy - 1500, cz - 1500}, hi[3] = {cx + 1500, cy + 1500, cz + 1500};
+        /* reject segments nowhere near: the original tests every object (0x100229d9), so the port's cull reaches as
+         * far as the unit's parts do (aircraft and gun emplacements hang parts up to 4500 out: the Orca 1634, the
+         * Raptor 3995, v23vgun1 4509), plus a margin for the pose */
+        if (u->reach <= 0) {
+            float r = 0;
+            for (int k = 0; k < u->gm.nparts; k++) {
+                float mn[3], mx[3];
+                if (world_object_bounds(w, u->obj[k], mn, mx)) continue;
+                const gearmodel_part *p = &u->gm.part[k];
+                float pp[3] = {p->x, p->y, p->z};
+                for (int q = 0; q < 3; q++) {
+                    float d = fmaxf(fabsf(pp[q] + mn[q]), fabsf(pp[q] + mx[q]));
+                    if (d > r) r = d;
+                }
+            }
+            ((unit *)u)->reach = r * 1.5f + 500;
+        }
+        float cx = u->s.x, cy = u->s.y, cz = u->s.z, rr = u->reach;
+        float lo[3] = {cx - rr, cy - rr, cz - rr}, hi[3] = {cx + rr, cy + rr, cz + rr};
         float tt;
         if (!seg_box(p0, p1, lo, hi, &tt)) continue;
         float s = sinf(u->s.heading * PI_F / 180), c = cosf(u->s.heading * PI_F / 180);

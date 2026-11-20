@@ -66,12 +66,14 @@ typedef struct {
     int   solid;       /* a mission object that stops shells (world_ray) */
     int   has_m;       /* a full turn (debris): m, rows of model -> world, instead of the yaw */
     float m[9];
+    int   close;       /* drawn with the near plane at 8 (the player's own arm in the cockpit, 0x10090d53) */
 } instance;
 
 #define WORLD_LIGHTS 0x100
 
 struct world {
     hg_archive *a;
+    float       near_z;   /* the view's near plane (camera +0x3c, world_set_near); 0: the 640-wide view's */
     mission     m;
     mesh       *meshes;  int nmeshes;
     tex_entry  *texs;    int ntexs, missing;
@@ -567,7 +569,12 @@ void world_free(world *w)
 
 typedef struct { float x, y, z, u, v, lr, lg, lb, f, lum; } vview;   /* view space + light + fog + luma row */
 
-#define NEAR_Z 20.0f
+/* The near plane (camera +0x3c, set by 0x100b8496): half the view's width x 0.5 + 1, 161 for the 640-wide view,
+ * whatever the window's size; 8 in the track view (0x1003719d's caller, view mode 1) and for the player's own arm in
+ * the cockpit (0x10090d53). Polygons are clipped there (0x10092667: z >= +0x3c). */
+#define NEAR_640 161.0f
+static float g_near = NEAR_640;
+#define NEAR_Z g_near
 
 static int clip_near(const vview *in, int n, vview *out)
 {
@@ -950,10 +957,12 @@ void world_draw(world *w, raster_target *t, const camera *cam)
     float fog_near = sg->density[2], fog_far = far2;
     int fog_on = sg->found && sg->fogswitch && fog_near > 0 && fog_far > fog_near && !g_nofog;
     t->fog_rgb = 0xff000000u | ((uint32_t)sg->fogcolor[0] << 16) | ((uint32_t)sg->fogcolor[1] << 8) | (uint32_t)sg->fogcolor[2];
+    g_near = w->near_z > 0 ? w->near_z : NEAR_640;
     draw_horizon(w, t, cam, f);
     for (int i = 0; i < w->ninst; i++) {
         const instance *in = &w->inst[i];
         if (in->hidden) continue;
+        g_near = in->close ? 8.0f : w->near_z > 0 ? w->near_z : NEAR_640;
         float dx = in->x - cam->x, dz = in->z - cam->z;
         if (!in->ground && dx * dx + dz * dz > far2 * far2) continue;
         /* detail level (0x10090750): the last level whose switch distance, times the view's detail scale, the
@@ -1617,6 +1626,7 @@ void world_draw_flat(world *w, raster_target *t, const camera *cam, const int *i
     float cy = cosf(cam->yaw * PI_F / 180), sy = sinf(cam->yaw * PI_F / 180);
     float cp = cosf(cam->pitch * PI_F / 180), sp = sinf(cam->pitch * PI_F / 180);
     float f = (float)t->w * 0.5f / tanf(cam->fov * 0.5f * PI_F / 180);
+    g_near = w->near_z > 0 ? w->near_z : NEAR_640;
     for (int i = 0; i < t->w * t->h; i++) t->depth[i] = 0.0f;
     for (int i = 0; i < n; i++) {
         if (ids[i] < 0 || ids[i] >= w->ninst) continue;
@@ -1665,4 +1675,14 @@ void world_draw_flat(world *w, raster_target *t, const camera *cam, const int *i
         }
         free(vv);
     }
+}
+
+void world_set_near(world *w, float near_z)
+{
+    w->near_z = near_z;
+}
+
+void world_set_close(world *w, int id, int on)
+{
+    if (id >= 0 && id < w->ninst) w->inst[id].close = on;
 }

@@ -2,6 +2,33 @@
 
 Heavy Gear native port by BatMahn - https://github.com/BatMahn/HeavyGear-Port
 
+## v1.0.2 (2026-11-20)
+
+Engine fixes found by checking the MechWarrior 2 and Mercenaries ports' recent fixes against Heavy Gear (same engine
+lineage). Each was confirmed in Heavy Gear's own binaries first; no code was taken from those ports.
+- **Shots hit aircraft and big vehicles everywhere.** Before testing a vehicle's parts, the port skipped any vehicle
+  more than 1,500 from the shot's path, measured from its origin. Several hang parts much farther out: the Orca (1,634),
+  the Raptor (3,995), v23vgun1 (4,509), the Draco, Stiletto and others, so hits on their outer parts went through. The
+  original tests every object (0x100229d9); the port's cull now reaches as far as each vehicle's parts do.
+- **The view's near plane is the original's.** The port clipped at 20 units. The original clips at half the view's
+  width x 0.5 + 1 (0x100b8496, camera +0x3c): 161 for the 640-wide view, whatever the window's size; 8 in the outside
+  track view (view mode 1).
+- **The cockpit shows only the gear's right arm**, as the original: in the cockpit view the player's vehicle is drawn
+  as its dum_rash / rash object alone (the arm and its gun, gear +0x490), with the near plane at 8 (0x10090d53). The
+  port drew the whole gear around the eye.
+- **Game folders copied from Windows**, where file names can be in any letter case: CHARINFO.HG1, the generated
+  mission files and the gear editor's designs are found and rewritten in the case the folder has them, instead of
+  writing a second copy beside them.
+- **Full screen: the pointer stays on the 4:3 picture** instead of wandering into the side bars.
+- **Windows: the executables are stripped** (no debugging symbols). heavygear.exe drops from 6.5 MB to 2 MB, and
+  scanners that flag unsigned programs with debug sections and an overlay have less to object to.
+
+Checked and not needed in Heavy Gear: one- and two-point polygons (none in the archive), the default horizon band (every
+mission has its HRZM), SKYGND.PAR fallbacks (every mission, the generated ones included, has its line), detail
+distances above 640 x 480 (the port draws the sim at 640 x 480), the shell's sounds on leaving a screen or launching a
+mission (already stopped as the original), record checksums (the port never refused them), and the AI's line of sight
+over terrain (already tested against the ground).
+
 ## v1.0.1 (2026-11-13)
 
 - **Cutscenes in the releases.** The Windows, macOS and Linux builds now have a small static FFmpeg linked in (AVI,
